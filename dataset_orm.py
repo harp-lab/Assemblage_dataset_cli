@@ -36,6 +36,7 @@ class Binary(Base):
     toolset_version = Column(String(length=15))
     github_url = Column(String(length=255))
     optimization = Column(String(length=15))
+    size = Column(Integer)
     pushed_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Function(Base):

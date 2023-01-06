@@ -147,7 +147,7 @@ def db_construct(dbfile, target_dir):
         pass
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
-    print("Constructing database, this will take a while")
+    print("preparing to write to database")
     binary_ds = []
     function_ds = []
     line_ds = []
@@ -177,7 +177,8 @@ def db_construct(dbfile, target_dir):
                 "build_mode":pdbinfo["Build_mode"],
                 "toolset_version":pdbinfo["Toolset_version"],
                 "pushed_at":datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S'),
-                "optimization":pdbinfo["Optimization"]
+                "optimization":pdbinfo["Optimization"],
+                "size": os.path.getsize(f'{target_dir}/{path}/{file_name_clean}')//1024
             })
             binary_rela[filename] = binary_id
             binary_id+=1
@@ -214,9 +215,9 @@ def db_construct(dbfile, target_dir):
                         function_id+=1
         os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
         runcmd(f"rm -rf {target_dir}/{folder}")
-    print("Saving bianry to database")
+    print("1/3 Saving bianry to database")
     db.bulk_add_binaries(binary_ds)
-    print("Saving function to database")
+    print("2/3 Saving function to database")
     db.bulk_add_functions(function_ds)
-    print("Saving line to database")
+    print("3/3 Saving line to database")
     db.bulk_add_lines(line_ds)
