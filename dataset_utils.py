@@ -148,6 +148,11 @@ def db_construct(dbfile, target_dir):
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
     print("Constructing database, this will take a while")
+    binary_ds = []
+    function_ds = []
+    line_ds = []
+    binary_id = 1
+    function_id = 1
     for folder in tqdm(os.listdir(target_dir)):
         identifier = folder
         bins = [x for x in os.listdir(os.path.join(target_dir, folder)) if not x.endswith(".json")]
@@ -163,16 +168,19 @@ def db_construct(dbfile, target_dir):
                 pass
             file_name_clean = "".join([x for x in binfile if (x in string.printable and x)])
             runcmd(f"mv {target_dir}/{folder}/{binfile} {target_dir}/{path}/{file_name_clean}")
-            bin_id = db.add_binary(github_url=pdbinfo["URL"],
-                        path=os.path.join(path, file_name_clean),
-                        file_name=filename,
-                        platform=pdbinfo["Platform"],
-                        build_mode=pdbinfo["Build_mode"],
-                        toolset_version=pdbinfo["Toolset_version"],
-                        pushed_at=datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S'),
-                        optimization=pdbinfo["Optimization"])
-            binary_rela[filename] = bin_id
-            
+            binary_ds.append({
+                "id":binary_id,
+                "github_url":pdbinfo["URL"],
+                "path":os.path.join(path, file_name_clean),
+                "file_name":filename,
+                "platform":pdbinfo["Platform"],
+                "build_mode":pdbinfo["Build_mode"],
+                "toolset_version":pdbinfo["Toolset_version"],
+                "pushed_at":datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S'),
+                "optimization":pdbinfo["Optimization"]
+            })
+            binary_rela[filename] = binary_id
+            binary_id+=1
             for binary_file in pdbinfo["Binary_info_list"]:
                 if filename in binary_file["file"]:
                     bin_id = binary_rela[filename]
@@ -181,11 +189,14 @@ def db_construct(dbfile, target_dir):
                         intersect_ratio = float(function_info["intersect_ratio"].replace("%", ""))/100
                         source_file = function_info["source_file"]
                         rva_strings = ",".join([f"{x['rva_start']}-{x['rva_end']}" for x in function_info["function_info"]])
-                        function_id = db.add_function(name=function_name,
-                                        source_file=source_file,
-                                        intersect_ratio=intersect_ratio,
-                                        rvas=rva_strings,
-                                        binary_id=bin_id)
+                        function_ds.append({
+                            "name":function_name,
+                            "source_file":source_file,
+                            "intersect_ratio":intersect_ratio,
+                            "rvas":rva_strings,
+                            "binary_id":bin_id,
+                            "id":function_id
+                        })
                         source_file = ""
                         for line_info in function_info["lines"]:
                             line_number = line_info["line_number"]
@@ -194,11 +205,18 @@ def db_construct(dbfile, target_dir):
                             source_code = line_info["source_code"]
                             if "source_file" in line_info:
                                 source_file = line_info["source_file"]
-                            db.add_line(line_number=line_number,
-                                        rva=rva_addr,
-                                        length=length,
-                                        source_code=source_code,
-                                        function_id=function_id)
-
+                            line_ds.append({
+                                "line_number":line_number,
+                                "rva":rva_addr,
+                                "length":length,
+                                "source_code":source_code,
+                                "function_id":function_id})
+                        function_id+=1
         os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
         runcmd(f"rm -rf {target_dir}/{folder}")
+    print("Saving bianry to database")
+    db.bulk_add_binaries(binary_ds)
+    print("Saving function to database")
+    db.bulk_add_functions(function_ds)
+    print("Saving line to database")
+    db.bulk_add_lines(line_ds)

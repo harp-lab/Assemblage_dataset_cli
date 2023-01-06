@@ -68,15 +68,11 @@ class Dataset_DB:
 
     def bulk_add_binaries(self, binaries):
         """ used to import lot of repos at a time """
-        for binary_info in binaries:
-            if "id" in binary_info.keys():
-                del binary_info["id"]
         binaries_objs = [Binary(**msg) for msg in binaries]
-
         with Session(self.engine) as session:
             session.bulk_save_objects(binaries_objs, return_defaults=True)
             session.commit()
-        return [binary.id for binary in binaries_objs]
+        return binaries_objs
 
     def add_function(self, name, source_file, intersect_ratio, rvas, binary_id):
         with Session(self.engine) as session:
@@ -89,6 +85,14 @@ class Dataset_DB:
             session.commit()
             return new_function.id
 
+    def bulk_add_functions(self, functions):
+        """ used to import lot of repos at a time """
+        functions_objs = [Function(**msg) for msg in functions]
+        with Session(self.engine) as session:
+            session.bulk_save_objects(functions_objs, return_defaults=True)
+            session.commit()
+        return functions_objs
+
     def add_line(self, line_number, rva, length, source_code, function_id):
         with Session(self.engine) as session:
             new_line = Line(line_number=line_number,
@@ -99,6 +103,14 @@ class Dataset_DB:
             session.add(new_line)
             session.commit()
             return new_line.id
+
+    def bulk_add_lines(self, lines):
+        """ used to import lot of repos at a time """
+        objs = [Line(**msg) for msg in lines]
+        with Session(self.engine) as session:
+            session.bulk_save_objects(objs, return_defaults=True)
+            session.commit()
+        return objs
 
     def init(self):
         init_clean_database(self.db_addr)
