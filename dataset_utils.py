@@ -24,7 +24,7 @@ def get_md5(s):
 
 def assign_path(filename):
     md5 = get_md5(filename)
-    return f"{md5[1]}/{md5[2]}/{md5[3]}/{md5[4]}/{md5[5]}"
+    return f"{md5[:2]}/{md5[2:]}"
 
 def runcmd(cmd):
 	stdout, stderr = None, None
