@@ -1,0 +1,7 @@
+data
+dataset
+sample
+__*
+*.out
+*.sqlite
+*.ipynb
