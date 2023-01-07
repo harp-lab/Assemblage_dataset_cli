@@ -23,7 +23,7 @@ def get_md5(s):
     return hashlib.md5(s.encode()).hexdigest()
 
 def assign_path(filename):
-    md5 = get_md5(filename)
+    md5 = str(get_md5(filename)).upper()
     return f"{md5[:2]}/{md5[2:]}"
 
 def runcmd(cmd):
@@ -147,7 +147,7 @@ def db_construct(dbfile, target_dir):
         pass
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
-    print("preparing to write to database")
+    print("Preparing data")
     binary_ds = []
     function_ds = []
     line_ds = []
@@ -215,9 +215,11 @@ def db_construct(dbfile, target_dir):
                         function_id+=1
         os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
         runcmd(f"rm -rf {target_dir}/{folder}")
-    print("1/3 Saving bianry to database")
+    print("Saving to database")
+    print("1/3 Saving bianry to database...")
     db.bulk_add_binaries(binary_ds)
-    print("2/3 Saving function to database")
+    print("2/3 Saving function to database...")
     db.bulk_add_functions(function_ds)
-    print("3/3 Saving line to database")
+    print("3/3 Saving line to database...")
     db.bulk_add_lines(line_ds)
+    print(f"Finished, database location: {dbfile}, binary location {target_dir}")
