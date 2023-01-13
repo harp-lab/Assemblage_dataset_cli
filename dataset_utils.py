@@ -231,6 +231,6 @@ def db_construct(dbfile, target_dir):
     db.bulk_add_binaries(binary_ds.values())
     print(f"2/3 Saving {len(function_ds)} function to database...")
     db.bulk_add_functions(function_ds)
-    print(f"3/3 Saving {len(line_ds)}line to database...")
+    print(f"3/3 Saving {len(line_ds)} line to database...")
     db.bulk_add_lines(line_ds)
     print(f"Finished, database location: {dbfile}, binary location: {target_dir}")
