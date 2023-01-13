@@ -13,6 +13,7 @@ from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import math
 
 from db import Dataset_DB
 from dataset_orm import *
@@ -97,9 +98,16 @@ def unzip_process(f, zip_path, folder_prefix, tmp, jsonfolders, data_prefix):
     runcmd(f"rm -rf {tmp}")
     return len(bin_found), pdb_dest, bin_found
 
+
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
     binpath = binpath+"/bins"
     print("Filtering files")
+    if not file_limit:
+        file_limit = math.inf
+    if not size_lower:
+        size_lower = 0
+    if not size_upper:
+        size_upper = math.inf
     for f in tqdm(os.listdir(binpath)):
         bts = os.path.getsize(os.path.join(binpath, f))
         kb = bts/1024
@@ -219,10 +227,10 @@ def db_construct(dbfile, target_dir):
         os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
         runcmd(f"rm -rf {target_dir}/{folder}")
     print("Saving to database")
-    print("1/3 Saving bianry to database...")
+    print(f"1/3 Saving {len(binary_ds)}bianry to database...")
     db.bulk_add_binaries(binary_ds.values())
-    print("2/3 Saving function to database...")
+    print(f"2/3 Saving {len(function_ds)} function to database...")
     db.bulk_add_functions(function_ds)
-    print("3/3 Saving line to database...")
+    print(f"3/3 Saving {len(line_ds)}line to database...")
     db.bulk_add_lines(line_ds)
-    print(f"Finished, database location: {dbfile}, binary location {target_dir}")
+    print(f"Finished, database location: {dbfile}, binary location: {target_dir}")

@@ -21,6 +21,7 @@ def main(data, s3, dest, g, uppersize, lowersize, amount, dbfile):
         assert dest
         assert dbfile
         runcmd(f"rm -rf {dest}")
+        runcmd(f"rm -rf {dbfile}")
         runcmd(f"mkdir {dest}")
         filter_size(uppersize, lowersize, amount, data, dest)
         db_construct(dbfile, dest)
