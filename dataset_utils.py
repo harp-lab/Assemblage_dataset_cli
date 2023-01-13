@@ -148,7 +148,7 @@ def db_construct(dbfile, target_dir):
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
     print("Preparing data")
-    binary_ds = []
+    binary_ds = {}
     function_ds = []
     line_ds = []
     binary_id = 1
@@ -168,23 +168,26 @@ def db_construct(dbfile, target_dir):
                 pass
             file_name_clean = "".join([x for x in binfile if (x in string.printable and x)])
             runcmd(f"mv {target_dir}/{folder}/{binfile} {target_dir}/{path}/{file_name_clean}")
-            binary_ds.append({
+            binary_ds[binary_id] = {
                 "id":binary_id,
                 "github_url":pdbinfo["URL"],
-                "path":os.path.join(path, file_name_clean),
+                "path":os.path.join(target_dir, path, file_name_clean),
                 "file_name":filename,
                 "platform":pdbinfo["Platform"],
                 "build_mode":pdbinfo["Build_mode"],
                 "toolset_version":pdbinfo["Toolset_version"],
                 "pushed_at":datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S'),
                 "optimization":pdbinfo["Optimization"],
-                "size": os.path.getsize(f'{target_dir}/{path}/{file_name_clean}')//1024
-            })
+                "size":os.path.getsize(os.path.join(target_dir, path, file_name_clean))//1024
+            }
             binary_rela[filename] = binary_id
             binary_id+=1
             for binary_file in pdbinfo["Binary_info_list"]:
-                if filename in binary_file["file"]:
+                if filename == binary_file["file"].replace("\\", "/").split("/")[-1]:
                     bin_id = binary_rela[filename]
+                    if len(binary_file["functions"])==0:
+                        del binary_ds[bin_id]
+                        continue
                     for function_info in binary_file["functions"]:
                         function_name = function_info["function_name"]
                         intersect_ratio = float(function_info["intersect_ratio"].replace("%", ""))/100
@@ -217,7 +220,7 @@ def db_construct(dbfile, target_dir):
         runcmd(f"rm -rf {target_dir}/{folder}")
     print("Saving to database")
     print("1/3 Saving bianry to database...")
-    db.bulk_add_binaries(binary_ds)
+    db.bulk_add_binaries(binary_ds.values())
     print("2/3 Saving function to database...")
     db.bulk_add_functions(function_ds)
     print("3/3 Saving line to database...")

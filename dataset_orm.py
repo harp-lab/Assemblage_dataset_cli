@@ -36,8 +36,8 @@ class Binary(Base):
     toolset_version = Column(String(length=15))
     github_url = Column(String(length=255))
     optimization = Column(String(length=15))
-    size = Column(Integer)
     pushed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    size = Column(Integer, default=0)
 
 class Function(Base):
     __tablename__ = 'functions'
@@ -79,7 +79,6 @@ def init_clean_database(db_str):
     except Exception as err:
         print(err)
     try:
-        print("Creating tables, don't exit program")
         Base.metadata.create_all(engine)
     except Exception as err:
         print(err)

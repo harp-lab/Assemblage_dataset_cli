@@ -1,6 +1,7 @@
 import click
 from dataset_utils import process, runcmd, filter_size, db_construct
-import math
+import random
+import os
 
 @click.command()
 @click.option('--data', help='The folder contains the data')
@@ -16,15 +17,11 @@ import math
 def main(data, s3, dest, g, uppersize, lowersize, amount, dbfile):
     """Assemblage Dataset Interface"""
     if g:
-        assert uppersize
-        assert lowersize
         assert data
         assert dest
         assert dbfile
         runcmd(f"rm -rf {dest}")
         runcmd(f"mkdir {dest}")
-        if not amount:
-            amount = math.inf
         filter_size(uppersize, lowersize, amount, data, dest)
         db_construct(dbfile, dest)
         return
