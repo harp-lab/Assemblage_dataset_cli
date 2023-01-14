@@ -8,23 +8,21 @@ import os
 @click.option('--s3',  help='The S3 bucket path for the dataset')
 @click.option('--dest', required=True, help='The destination folder for the data, will be created and overwritten.')
 @click.option('-g', is_flag=True, help='Generate dataset, you need also need to provide other specs')
-@click.option('--uppersize', type=int,  help='The upper binary size you want to filter in KB')
-@click.option('--lowersize', type=int, help='The smallest binary size you want to filter in KB')
-@click.option('--amount', type=int, help='The amount of binary files you want to get')
+# @click.option('--uppersize', type=int,  help='The upper binary size you want to filter in KB')
+# @click.option('--lowersize', type=int, help='The smallest binary size you want to filter in KB')
+# @click.option('--amount', type=int, help='The amount of binary files you want to get')
 @click.option('--dbfile', help='The database file')
 
 
-def main(data, s3, dest, g, uppersize, lowersize, amount, dbfile):
+def main(data, s3, dest, g, dbfile):
     """Assemblage Dataset Interface"""
     if g:
         assert data
-        assert dest
         assert dbfile
         runcmd(f"rm -rf {dest}")
         runcmd(f"rm -rf {dbfile}")
         runcmd(f"mkdir {dest}")
-        filter_size(uppersize, lowersize, amount, data, dest)
-        db_construct(dbfile, dest)
+        db_construct(dbfile, data)
         return
     if data:
         runcmd(f"rm -rf {dest}")

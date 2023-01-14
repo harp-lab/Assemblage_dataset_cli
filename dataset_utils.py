@@ -14,6 +14,9 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import math
+import zipfile
+import concurrent.futures
+import shutil
 
 from db import Dataset_DB
 from dataset_orm import *
@@ -43,39 +46,26 @@ def runcmd(cmd):
 	return stdout, stderr, process.returncode
 
 
-def process(zip_path, dest):
-    data_prefix = dest
-    runcmd(f"mkdir {data_prefix}")
-    tmp = f"{data_prefix}/tmp"
-    folder_prefix = f"{data_prefix}/bins"
-    runcmd(f"rm -rf {folder_prefix}")
-    runcmd(f"mkdir {folder_prefix}")
-    jsonfolders = f"{data_prefix}/jsons"
-    runcmd(f"rm -rf {jsonfolders}")
-    runcmd(f"mkdir {jsonfolders}")
+def process(zip_path, dest, threads=2560):
+    runcmd(f"mkdir {dest}")
+    runcmd(f"rm -rf {dest}")
+    runcmd(f"mkdir {dest}")
     print("Collecting binary files")
     zipped_files = [x for x in glob.glob(f"{zip_path}/*") if os.path.isfile(x)]
     total = len(zipped_files)
     print(f"Found {total} zips")
-    totalbin = 0
-    pdb_rela = {}
-    for i,f in enumerate(zipped_files):
-        bin_found, pdb, bins = unzip_process(f, zip_path, folder_prefix, tmp, jsonfolders, data_prefix)
-        totalbin+=bin_found
-        pdb_rela[pdb] = bins
-        print(f"Task {f}, {i}/{total}, found {bin_found}, total {totalbin} found")
-    with open(f"{dest}/pdb_rela.json", "w") as f:
-        json.dump(pdb_rela, f)
+    for f in tqdm(zipped_files):
+        threading.Thread(target=unzip_process, args=(f, dest)).start()
 
-def unzip_process(f, zip_path, folder_prefix, tmp, jsonfolders, data_prefix):
-    runcmd(f"rm -rf {tmp}")
-    runcmd(f"mkdir {tmp}")
-    runcmd(f"unzip {f} -d {tmp}")
-    bin_found = []
-    identifier = os.urandom(16).hex()
+def unzip_process(f, dest):
+    tmp = f"{dest}/{os.urandom(32).hex()}"
+    with zipfile.ZipFile(f, 'r') as zip_ref:
+        zip_ref.extractall(tmp)
     if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
         with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
             pdb = json.load(pdbf)
+        if glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll") == []:
+            return 0
         for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll"):
             bin_name = binf.split("/")[-1]
             plat = pdb["Platform"] or "unknown"
@@ -84,20 +74,15 @@ def unzip_process(f, zip_path, folder_prefix, tmp, jsonfolders, data_prefix):
             opti = pdb["Optimization"]
             github_url = pdb["URL"]
             identifier = get_md5(github_url)+f"_{plat}_{mode}_{toolv}_{opti}"
-            dest_path = f"{folder_prefix}/{identifier}_{bin_name}"
-            if os.path.isfile(dest_path):
-                print(dest_path, 'existed')
-                continue
-            bin_found.append(dest_path)
-            runcmd(f"cp '{binf}' {dest_path}")
-    else:
-        return 0, "", []
-    pdbpath = os.path.join(tmp, "pdbinfo.json")
-    pdb_dest = os.path.join(jsonfolders, f"{identifier}.json")
-    runcmd(f"cp {pdbpath} {pdb_dest}")
-    runcmd(f"rm -rf {tmp}")
-    return len(bin_found), pdb_dest, bin_found
-
+            bin_dest = f"{identifier}_{bin_name}"
+            if not os.path.isdir(f"{dest}/{identifier}"):
+                os.makedirs(f"{dest}/{identifier}")
+            if not os.path.isfile(bin_dest):
+                shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
+        pdbpath = os.path.join(tmp, "pdbinfo.json")
+        shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
+    shutil.rmtree(tmp)
+    return 1
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
     binpath = binpath+"/bins"
