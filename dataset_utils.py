@@ -47,42 +47,50 @@ def runcmd(cmd):
 
 
 def process(zip_path, dest, threads=2560):
-    runcmd(f"mkdir {dest}")
     runcmd(f"rm -rf {dest}")
     runcmd(f"mkdir {dest}")
-    print("Collecting binary files")
+    print("Sorting files")
     zipped_files = [x for x in glob.glob(f"{zip_path}/*") if os.path.isfile(x)]
-    total = len(zipped_files)
+    total = len(zipped_files)cd 
     print(f"Found {total} zips")
     for f in tqdm(zipped_files):
-        threading.Thread(target=unzip_process, args=(f, dest)).start()
+        # threading.Thread(target=unzip_process, args=(f, dest)).start()
+        unzip_process(f, dest)
+
 
 def unzip_process(f, dest):
     tmp = f"{dest}/{os.urandom(32).hex()}"
-    with zipfile.ZipFile(f, 'r') as zip_ref:
-        zip_ref.extractall(tmp)
-    if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
-        with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
-            pdb = json.load(pdbf)
-        if glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll") == []:
-            return 0
-        for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll"):
-            bin_name = binf.split("/")[-1]
-            plat = pdb["Platform"] or "unknown"
-            mode = pdb["Build_mode"]
-            toolv = pdb["Toolset_version"]
-            opti = pdb["Optimization"]
-            github_url = pdb["URL"]
-            identifier = get_md5(github_url)+f"_{plat}_{mode}_{toolv}_{opti}"
-            bin_dest = f"{identifier}_{bin_name}"
-            if not os.path.isdir(f"{dest}/{identifier}"):
-                os.makedirs(f"{dest}/{identifier}")
-            if not os.path.isfile(bin_dest):
-                shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
-        pdbpath = os.path.join(tmp, "pdbinfo.json")
-        shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
-    shutil.rmtree(tmp)
-    return 1
+    try:
+        with zipfile.ZipFile(f, 'r') as zip_ref:
+            zip_ref.extractall(tmp)
+        if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
+            with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
+                pdb = json.load(pdbf)
+            if glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll") == []:
+                return
+            for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll"):
+                bin_name = binf.split("/")[-1]
+                plat = pdb["Platform"] or "unknown"
+                mode = pdb["Build_mode"]
+                toolv = pdb["Toolset_version"]
+                opti = pdb["Optimization"]
+                github_url = pdb["URL"]
+                identifier = get_md5(github_url)+f"_{plat}_{mode}_{toolv}_{opti}"
+                bin_dest = f"{identifier}_{bin_name}"
+                if not os.path.isdir(f"{dest}/{identifier}"):
+                    os.makedirs(f"{dest}/{identifier}")
+                if not os.path.isfile(bin_dest):
+                    shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
+            pdbpath = os.path.join(tmp, "pdbinfo.json")
+            shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
+        shutil.rmtree(tmp)
+    except:
+        pass
+    try:
+        shutil.rmtree(tmp)
+    except:
+        pass
+
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
     binpath = binpath+"/bins"
@@ -222,7 +230,6 @@ def db_construct(dbfile, target_dir):
     db.bulk_add_lines(line_ds)
     print(f"Finished, database location: {dbfile}, binary location: {target_dir}")
 
-
 def db_construct_slow(dbfile, target_dir):
     print("Creating database")
     try:
@@ -231,7 +238,8 @@ def db_construct_slow(dbfile, target_dir):
         pass
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
-    print("Constructing database, this will take a while")
+    print("Constructing database, this will long time")
+
     for folder in tqdm(os.listdir(target_dir)):
         identifier = folder
         bins = [x for x in os.listdir(os.path.join(target_dir, folder)) if not x.endswith(".json")]
@@ -248,17 +256,21 @@ def db_construct_slow(dbfile, target_dir):
             file_name_clean = "".join([x for x in binfile if (x in string.printable and x)])
             runcmd(f"mv {target_dir}/{folder}/{binfile} {target_dir}/{path}/{file_name_clean}")
             bin_id = db.add_binary(github_url=pdbinfo["URL"],
-                        path=os.path.join(path, file_name_clean),
+                        path=os.path.join(target_dir, path, file_name_clean),
                         file_name=filename,
                         platform=pdbinfo["Platform"],
                         build_mode=pdbinfo["Build_mode"],
                         toolset_version=pdbinfo["Toolset_version"],
                         pushed_at=datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S'),
-                        optimization=pdbinfo["Optimization"])
+                        optimization=pdbinfo["Optimization"],
+                        size=os.path.getsize(os.path.join(target_dir, path, file_name_clean))//1024
+                        )
             binary_rela[filename] = bin_id
             for binary_file in pdbinfo["Binary_info_list"]:
-                if filename in binary_file["file"]:
+                if filename == binary_file["file"].replace("\\", "/").split("/")[-1]:
                     bin_id = binary_rela[filename]
+                    if len(binary_file["functions"])==0:
+                        db.delete_binary(bin_id)
                     for function_info in binary_file["functions"]:
                         function_name = function_info["function_name"]
                         intersect_ratio = float(function_info["intersect_ratio"].replace("%", ""))/100
@@ -283,4 +295,5 @@ def db_construct_slow(dbfile, target_dir):
                                         source_code=source_code,
                                         function_id=function_id)
         os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
-        runcmd(f"rm -rf {target_dir}/{folder}") 
+        runcmd(f"rm -rf {target_dir}/{folder}")
+    print(f"Finished, database location: {dbfile}, binary location: {target_dir}")

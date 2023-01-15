@@ -4,7 +4,7 @@ import time
 import logging
 
 import sqlalchemy.exc
-from sqlalchemy import select, update, create_engine, func, or_
+from sqlalchemy import select, update, create_engine, func, or_, delete
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import desc, true
 from sqlalchemy.ext.compiler import compiles
@@ -52,7 +52,7 @@ class Dataset_DB:
             result = session.execute(query).first()
             return result[0].path
 
-    def add_binary(self, github_url, file_name, platform, build_mode, pushed_at, toolset_version, optimization, path):
+    def add_binary(self, github_url, file_name, platform, build_mode, pushed_at, toolset_version, optimization, path, size):
         with Session(self.engine) as session:
             new_binary = Binary(github_url=github_url,
                                 file_name=file_name,
@@ -61,7 +61,8 @@ class Dataset_DB:
                                 build_mode=build_mode,
                                 toolset_version=toolset_version,
                                 pushed_at=pushed_at,
-                                optimization=optimization)
+                                optimization=optimization,
+                                size=size)
             session.add(new_binary)
             session.commit()
             return new_binary.id
@@ -111,6 +112,12 @@ class Dataset_DB:
             session.bulk_save_objects(objs, return_defaults=True)
             session.commit()
         return objs
+
+    def delete_binary(self, binary_id):
+        with Session(self.engine) as session:
+            q = delete(Binary).where(Binary.id == binary_id)
+            session.execute(q)
+            session.commit()
 
     def init(self):
         init_clean_database(self.db_addr)
