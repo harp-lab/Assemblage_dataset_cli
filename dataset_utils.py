@@ -107,7 +107,7 @@ def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
         runcmd(f"cp {binpath.replace('/bins','')}/jsons/{urlmd5}* {dest_path}")
     print("Copying pdb files")
     for f in tqdm(os.listdir(dest_path)):
-        if f.endswith("json") and not f.endswith("pdb_rela.json"):
+        if f.endswith("json"):
             with open(os.path.join(dest_path, f)) as fhandler:
                 pdb = json.load(fhandler)
             plat = pdb["Platform"]
@@ -146,9 +146,10 @@ def db_construct(dbfile, target_dir):
     line_ds = []
     binary_id = 1
     function_id = 1
-    for folder in tqdm(os.listdir(target_dir)):
-        identifier = folder
-        bins = [x for x in os.listdir(os.path.join(target_dir, folder)) if not x.endswith(".json")]
+    for identifier in tqdm(os.listdir(target_dir)):
+        if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
+            continue
+        bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if not x.endswith(".json")]
         pdbinfo = json.load(open(os.path.join(target_dir, identifier, f"{identifier}.json")))
         binary_rela = {}
         for binfile in bins:
@@ -160,7 +161,9 @@ def db_construct(dbfile, target_dir):
             except:
                 pass
             file_name_clean = "".join([x for x in binfile if (x in string.printable and x)])
-            runcmd(f"mv {target_dir}/{folder}/{binfile} {target_dir}/{path}/{file_name_clean}")
+            shutil.copy(os.path.join(target_dir, identifier, binfile), os.path.join(target_dir, path, file_name_clean))
+            if not os.path.isfile(os.path.join(target_dir, path, file_name_clean)):
+                continue
             binary_ds[binary_id] = {
                 "id":binary_id,
                 "github_url":pdbinfo["URL"],
@@ -209,13 +212,75 @@ def db_construct(dbfile, target_dir):
                                 "source_code":source_code,
                                 "function_id":function_id})
                         function_id+=1
-        os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
-        runcmd(f"rm -rf {target_dir}/{folder}")
+        runcmd(f"rm -rf {target_dir}/{identifier}")
     print("Saving to database")
-    print(f"1/3 Saving {len(binary_ds)}bianry to database...")
+    print(f"1/3 Saving {len(binary_ds)} bianry to database...")
     db.bulk_add_binaries(binary_ds.values())
     print(f"2/3 Saving {len(function_ds)} function to database...")
     db.bulk_add_functions(function_ds)
     print(f"3/3 Saving {len(line_ds)} line to database...")
     db.bulk_add_lines(line_ds)
     print(f"Finished, database location: {dbfile}, binary location: {target_dir}")
+
+
+def db_construct_slow(dbfile, target_dir):
+    print("Creating database")
+    try:
+        os.remove(dbfile)
+    except:
+        pass
+    init_clean_database(f"sqlite:///{dbfile}")
+    db = Dataset_DB(f"sqlite:///{dbfile}")
+    print("Constructing database, this will take a while")
+    for folder in tqdm(os.listdir(target_dir)):
+        identifier = folder
+        bins = [x for x in os.listdir(os.path.join(target_dir, folder)) if not x.endswith(".json")]
+        pdbinfo = json.load(open(os.path.join(target_dir, identifier, f"{identifier}.json")))
+        binary_rela = {}
+        for binfile in bins:
+            filename = binfile.replace(identifier+"_", "")
+            path = f"{assign_path(binfile)}"
+            path = "".join([x for x in path if (x in string.printable and x)])
+            try:
+                os.makedirs(f"{target_dir}/{path}")
+            except:
+                pass
+            file_name_clean = "".join([x for x in binfile if (x in string.printable and x)])
+            runcmd(f"mv {target_dir}/{folder}/{binfile} {target_dir}/{path}/{file_name_clean}")
+            bin_id = db.add_binary(github_url=pdbinfo["URL"],
+                        path=os.path.join(path, file_name_clean),
+                        file_name=filename,
+                        platform=pdbinfo["Platform"],
+                        build_mode=pdbinfo["Build_mode"],
+                        toolset_version=pdbinfo["Toolset_version"],
+                        pushed_at=datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S'),
+                        optimization=pdbinfo["Optimization"])
+            binary_rela[filename] = bin_id
+            for binary_file in pdbinfo["Binary_info_list"]:
+                if filename in binary_file["file"]:
+                    bin_id = binary_rela[filename]
+                    for function_info in binary_file["functions"]:
+                        function_name = function_info["function_name"]
+                        intersect_ratio = float(function_info["intersect_ratio"].replace("%", ""))/100
+                        source_file = function_info["source_file"]
+                        rva_strings = ",".join([f"{x['rva_start']}-{x['rva_end']}" for x in function_info["function_info"]])
+                        function_id = db.add_function(name=function_name,
+                                        source_file=source_file,
+                                        intersect_ratio=intersect_ratio,
+                                        rvas=rva_strings,
+                                        binary_id=bin_id)
+                        source_file = ""
+                        for line_info in function_info["lines"]:
+                            line_number = line_info["line_number"]
+                            rva_addr = line_info["rva"]
+                            length = line_info["length"]
+                            source_code = line_info["source_code"]
+                            if "source_file" in line_info:
+                                source_file = line_info["source_file"]
+                            db.add_line(line_number=line_number,
+                                        rva=rva_addr,
+                                        length=length,
+                                        source_code=source_code,
+                                        function_id=function_id)
+        os.remove(os.path.join(target_dir, identifier, f"{identifier}.json"))
+        runcmd(f"rm -rf {target_dir}/{folder}") 

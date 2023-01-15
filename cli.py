@@ -1,29 +1,26 @@
 import click
-from dataset_utils import process, runcmd, filter_size, db_construct
+from dataset_utils import process, runcmd, db_construct, db_construct_slow
 import random
 import os
 
 @click.command()
 @click.option('--data', help='The folder contains the data')
 @click.option('--s3',  help='The S3 bucket path for the dataset')
-@click.option('--dest', required=True, help='The destination folder for the data, will be created and overwritten.')
+@click.option('--dest', help='The destination folder for the data, will be created and overwritten.')
 @click.option('-g', is_flag=True, help='Generate dataset, you need also need to provide other specs')
-# @click.option('--uppersize', type=int,  help='The upper binary size you want to filter in KB')
-# @click.option('--lowersize', type=int, help='The smallest binary size you want to filter in KB')
-# @click.option('--amount', type=int, help='The amount of binary files you want to get')
 @click.option('--dbfile', help='The database file')
+@click.option('--slow', is_flag=True, help='Will significantly slow processing, but consume much less memory. Use it if you have less memory and good disk')
 
-
-def main(data, s3, dest, g, dbfile):
+def main(data, s3, dest, g, dbfile, slow):
     """Assemblage Dataset Interface"""
     if g:
         assert data
         assert dbfile
-        runcmd(f"rm -rf {dest}")
         runcmd(f"rm -rf {dbfile}")
-        runcmd(f"mkdir {dest}")
-        db_construct(dbfile, data)
-        return
+        if slow:
+            db_construct_slow(dbfile, data)
+        else:
+            db_construct(dbfile, data)
     if data:
         runcmd(f"rm -rf {dest}")
         process(data, dest)
