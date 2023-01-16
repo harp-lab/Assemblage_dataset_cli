@@ -150,10 +150,10 @@ def db_construct(dbfile, target_dir):
     print("Preparing data")
     binary_id = 1
     function_id = 1
+    binary_ds = {}
+    function_ds = []
+    line_ds = []
     for identifier in tqdm(os.listdir(target_dir)):
-        binary_ds = {}
-        function_ds = []
-        line_ds = []
         if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if not x.endswith(".json")]
@@ -220,10 +220,16 @@ def db_construct(dbfile, target_dir):
                                 "function_id":function_id})
                         function_id+=1
         runcmd(f"rm -rf {target_dir}/{identifier}")
-        db.bulk_add_binaries(binary_ds.values())
-        db.bulk_add_functions(function_ds)
-        db.bulk_add_lines(line_ds)
-
+        if len(binary_ds)>1000:
+            db.bulk_add_binaries(binary_ds.values())
+            db.bulk_add_functions(function_ds)
+            db.bulk_add_lines(line_ds)
+            binary_ds = {}
+            function_ds = []
+            line_ds = []
+    db.bulk_add_binaries(binary_ds.values())
+    db.bulk_add_functions(function_ds)
+    db.bulk_add_lines(line_ds)
     print(f"Finished, database location: {dbfile}, binary location: {target_dir}")
 
 def db_construct_slow(dbfile, target_dir):

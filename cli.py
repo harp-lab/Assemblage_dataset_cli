@@ -16,7 +16,7 @@ import os
 @click.option('--amount', help='Files to be processed')
 
 
-def main(data, s3, dest, g, dbfile, slow):
+def main(data, s3, dest, g, dbfile, slow, f, uppersize, lowersize, amount):
     """Assemblage Dataset Interface"""
     if g:
         assert data
@@ -26,7 +26,7 @@ def main(data, s3, dest, g, dbfile, slow):
             db_construct_slow(dbfile, data)
         else:
             db_construct(dbfile, data)
-    if data:
+    elif data:
         runcmd(f"rm -rf {dest}")
         process(data, dest)
     elif s3:
