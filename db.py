@@ -69,6 +69,8 @@ class Dataset_DB:
 
     def bulk_add_binaries(self, binaries):
         """ used to import lot of repos at a time """
+        if not binaries:
+            return []
         binaries_objs = [Binary(**msg) for msg in binaries]
         with Session(self.engine) as session:
             session.bulk_save_objects(binaries_objs, return_defaults=True)
@@ -88,6 +90,8 @@ class Dataset_DB:
 
     def bulk_add_functions(self, functions):
         """ used to import lot of repos at a time """
+        if not functions:
+            return []
         functions_objs = [Function(**msg) for msg in functions]
         with Session(self.engine) as session:
             session.bulk_save_objects(functions_objs, return_defaults=True)
@@ -107,6 +111,8 @@ class Dataset_DB:
 
     def bulk_add_lines(self, lines):
         """ used to import lot of repos at a time """
+        if not lines:
+            return []
         objs = [Line(**msg) for msg in lines]
         with Session(self.engine) as session:
             session.bulk_save_objects(objs, return_defaults=True)

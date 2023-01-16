@@ -46,15 +46,14 @@ def runcmd(cmd):
 	return stdout, stderr, process.returncode
 
 
-def process(zip_path, dest, threads=2560):
+def process(zip_path, dest):
     runcmd(f"rm -rf {dest}")
     runcmd(f"mkdir {dest}")
     print("Sorting files")
     zipped_files = [x for x in glob.glob(f"{zip_path}/*") if os.path.isfile(x)]
-    total = len(zipped_files)cd 
+    total = len(zipped_files)
     print(f"Found {total} zips")
     for f in tqdm(zipped_files):
-        # threading.Thread(target=unzip_process, args=(f, dest)).start()
         unzip_process(f, dest)
 
 
@@ -149,12 +148,12 @@ def db_construct(dbfile, target_dir):
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
     print("Preparing data")
-    binary_ds = {}
-    function_ds = []
-    line_ds = []
     binary_id = 1
     function_id = 1
     for identifier in tqdm(os.listdir(target_dir)):
+        binary_ds = {}
+        function_ds = []
+        line_ds = []
         if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if not x.endswith(".json")]
@@ -221,13 +220,10 @@ def db_construct(dbfile, target_dir):
                                 "function_id":function_id})
                         function_id+=1
         runcmd(f"rm -rf {target_dir}/{identifier}")
-    print("Saving to database")
-    print(f"1/3 Saving {len(binary_ds)} bianry to database...")
-    db.bulk_add_binaries(binary_ds.values())
-    print(f"2/3 Saving {len(function_ds)} function to database...")
-    db.bulk_add_functions(function_ds)
-    print(f"3/3 Saving {len(line_ds)} line to database...")
-    db.bulk_add_lines(line_ds)
+        db.bulk_add_binaries(binary_ds.values())
+        db.bulk_add_functions(function_ds)
+        db.bulk_add_lines(line_ds)
+
     print(f"Finished, database location: {dbfile}, binary location: {target_dir}")
 
 def db_construct_slow(dbfile, target_dir):

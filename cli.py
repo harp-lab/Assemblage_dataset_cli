@@ -10,6 +10,11 @@ import os
 @click.option('-g', is_flag=True, help='Generate dataset, you need also need to provide other specs')
 @click.option('--dbfile', help='The database file')
 @click.option('--slow', is_flag=True, help='Will significantly slow processing, but consume much less memory. Use it if you have less memory and good disk')
+@click.option('-f', is_flag=True, help='Filter the data folder')
+@click.option('--uppersize', help='Maximum size of binary file')
+@click.option('--lowersize', help='Minimum size of binary file')
+@click.option('--amount', help='Files to be processed')
+
 
 def main(data, s3, dest, g, dbfile, slow):
     """Assemblage Dataset Interface"""
