@@ -5,7 +5,7 @@ import os
 
 @click.command()
 @click.option('--data', help='The folder contains the data')
-@click.option('--s3',  help='The S3 bucket path for the dataset')
+@click.option('--s3',  is_flag=True, help='The S3 bucket path for the dataset')
 @click.option('--dest', help='The destination folder for the data, will be created and overwritten.')
 @click.option('-g', is_flag=True, help='Generate dataset, you need also need to provide other specs')
 @click.option('--dbfile', help='The database file')
@@ -31,8 +31,7 @@ def main(data, s3, dest, g, dbfile, slow, f, uppersize, lowersize, amount):
         process(data, dest)
     elif s3:
         runcmd(f"mkdir {dest}")
-        runcmd(f"aws s3 cp s3://assemblage-data/data/ ./{dest} --recursive")
-        process(dest)
+        os.system(f"aws s3 cp s3://assemblage-data/platform/windows/ ./{dest} --recursive")
 
 
 if __name__ == '__main__':
