@@ -14,18 +14,22 @@ import os
 @click.option('--uppersize', help='Maximum size of binary file')
 @click.option('--lowersize', help='Minimum size of binary file')
 @click.option('--amount', help='Files to be processed')
+@click.option('--nolines', is_flag=True, help='Do not store lines information in the database')
 
 
-def main(data, s3, dest, g, dbfile, slow, f, uppersize, lowersize, amount):
+
+def main(data, s3, dest, g, dbfile, slow, f, uppersize, lowersize, amount, nolines):
     """Assemblage Dataset Interface"""
+    if not nolines:
+        nolines = False
     if g:
         assert data
         assert dbfile
         runcmd(f"rm -rf {dbfile}")
         if slow:
-            db_construct_slow(dbfile, data)
+            db_construct_slow(dbfile, data, nolines)
         else:
-            db_construct(dbfile, data)
+            db_construct(dbfile, data, nolines)
     elif data:
         runcmd(f"rm -rf {dest}")
         process(data, dest)

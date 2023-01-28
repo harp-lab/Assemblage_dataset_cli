@@ -17,6 +17,7 @@ import math
 import zipfile
 import concurrent.futures
 import shutil
+import logging
 
 from db import Dataset_DB
 from dataset_orm import *
@@ -54,8 +55,7 @@ def process(zip_path, dest):
     total = len(zipped_files)
     print(f"Found {total} zips")
     for f in tqdm(zipped_files):
-        unzip_process(f, dest)
-
+        threading.Thread(target=unzip_process, args=(f, dest)).start()
 
 def unzip_process(f, dest):
     tmp = f"{dest}/{os.urandom(32).hex()}"
@@ -65,6 +65,13 @@ def unzip_process(f, dest):
         if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
             with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
                 pdb = json.load(pdbf)
+            for Binary_info_list in pdb["Binary_info_list"]:
+                if len(Binary_info_list["functions"]) == 0:
+                    try:
+                        shutil.rmtree(tmp)
+                    except:
+                        pass
+                    return
             if glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll") == []:
                 return
             for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll"):
@@ -78,6 +85,8 @@ def unzip_process(f, dest):
                 bin_dest = f"{identifier}_{bin_name}"
                 if not os.path.isdir(f"{dest}/{identifier}"):
                     os.makedirs(f"{dest}/{identifier}")
+                else:
+                    pass
                 if not os.path.isfile(bin_dest):
                     shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
             pdbpath = os.path.join(tmp, "pdbinfo.json")
@@ -139,7 +148,7 @@ def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
         else:
             runcmd(f"rm {dest_path}/{folder}")
 
-def db_construct(dbfile, target_dir):
+def db_construct(dbfile, target_dir, nolines):
     print("Creating database")
     try:
         os.remove(dbfile)
@@ -229,10 +238,11 @@ def db_construct(dbfile, target_dir):
             line_ds = []
     db.bulk_add_binaries(binary_ds.values())
     db.bulk_add_functions(function_ds)
-    db.bulk_add_lines(line_ds)
+    if nolines:
+        db.bulk_add_lines(line_ds)
     print(f"Finished, database location: {dbfile}, binary location: {target_dir}")
 
-def db_construct_slow(dbfile, target_dir):
+def db_construct_slow(dbfile, target_dir, nolines):
     print("Creating database")
     try:
         os.remove(dbfile)
