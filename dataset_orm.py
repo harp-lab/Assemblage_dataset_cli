@@ -7,7 +7,7 @@ import datetime
 import json
 
 from sqlalchemy.orm import Session
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, create_engine, LargeBinary, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, create_engine, LargeBinary, Float, BigInteger
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.sql.expression import column
 from sqlalchemy.sql.schema import ForeignKey
@@ -29,31 +29,34 @@ class Binary(Base):
     __tablename__ = 'binaries'
 
     id = Column(Integer, primary_key=True, autoincrement=True,)
-    file_name = Column(String(length=255))
-    path = Column(String(length=255))
-    platform = Column(String(length=15))
-    build_mode = Column(String(length=15))
-    toolset_version = Column(String(length=15))
-    github_url = Column(String(length=255))
-    optimization = Column(String(length=15))
-    pushed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    file_name = Column(String(length=32))
+    platform = Column(String(length=8))
+    build_mode = Column(String(length=8))
+    toolset_version = Column(String(length=4))
+    github_url = Column(String(length=128))
+    optimization = Column(String(length=2))
+    pushed_at = Column(Integer)
     size = Column(Integer, default=0)
+    source_file = Column(String(length=128))
 
 class Function(Base):
     __tablename__ = 'functions'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(length=255))
-    source_file = Column(String(length=255))
+    name = Column(String(length=128))
     intersect_ratio = Column(Float)
-    rvas = Column(String(length=255))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
 
+class RVA(Base):
+    __tablename__ = 'rvas'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    start = Column(BigInteger)
+    end = Column(BigInteger)
+    function_id = Column(Integer, ForeignKey('functions.id'))
 
 class Line(Base):
     __tablename__ = 'lines'
     id = Column(Integer, primary_key=True, autoincrement=True)
     line_number = Column(Integer)
-    rva = Column(String(length=255))
     length = Column(Integer)
     source_code = Column(Text)
     function_id = Column(Integer, ForeignKey('functions.id'),)
