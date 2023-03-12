@@ -57,21 +57,20 @@ def process(zip_path, dest):
     runcmd(f"mkdir {dest}")
     print("Sorting files")
     zipped_files = [x for x in glob.glob(f"{zip_path}/*") if os.path.isfile(x)]
-    total = len(zipped_files)
-    # print(f"Found {total} zips")
     for f in tqdm(zipped_files):
         threading.Thread(target=unzip_process, args=(f, dest)).start()
 
 
 def unzip_process(f, dest):
+    """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
     try:
         with zipfile.ZipFile(f, 'r') as zip_ref:
             zip_ref.extractall(tmp)
         if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
             with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
-                pdb = json.load(pdbf)
-            for Binary_info_list in pdb["Binary_info_list"]:
+                pdb_info_dict = json.load(pdbf)
+            for Binary_info_list in pdb_info_dict["Binary_info_list"]:
                 if len(Binary_info_list["functions"]) == 0:
                     try:
                         shutil.rmtree(tmp)
@@ -81,13 +80,13 @@ def unzip_process(f, dest):
             if glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll") == []:
                 shutil.rmtree(tmp)
                 return
-            for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll"):
+            for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll")+glob.glob(tmp+"/*.pdb"):
                 bin_name = binf.split("/")[-1]
-                plat = pdb["Platform"] or "unknown"
-                mode = pdb["Build_mode"]
-                toolv = pdb["Toolset_version"]
-                opti = pdb["Optimization"]
-                github_url = pdb["URL"]
+                plat = pdb_info_dict["Platform"] or "unknown"
+                mode = pdb_info_dict["Build_mode"]
+                toolv = pdb_info_dict["Toolset_version"]
+                opti = pdb_info_dict["Optimization"]
+                github_url = pdb_info_dict["URL"]
                 identifier = get_md5(github_url)[:5] + \
                     f"_{plat}_{mode}_{toolv}_{opti}"
                 bin_dest = f"{identifier}_{bin_name}"
@@ -99,7 +98,6 @@ def unzip_process(f, dest):
                     shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
             pdbpath = os.path.join(tmp, "pdbinfo.json")
             shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
-        shutil.rmtree(tmp)
     except:
         pass
     try:
@@ -159,7 +157,7 @@ def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
             runcmd(f"rm -r {dest_path}/{folder}")
 
 
-def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas):
+def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
     print("Creating database")
     try:
         os.remove(dbfile)
@@ -174,24 +172,31 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     function_ds = []
     line_ds = []
     rva_ds = []
+    pdb_ds = []
     for identifier in tqdm(os.listdir(target_dir)):
         if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
             continue
-        bins = [x for x in os.listdir(os.path.join(
-            target_dir, identifier)) if not x.endswith(".json")]
+        bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe") or x.lower().endswith(".dll"))]
+        pdbs = [x for x in os.listdir(os.path.join(target_dir, identifier)) if x.lower().endswith(".pdb")]
         pdbinfo = json.load(
             open(os.path.join(target_dir, identifier, f"{identifier}.json")))
         binary_rela = {}
+        pdb_paths_moved = []
+        for pdbfile in pdbs:
+            pdb_folder = assign_path(str(binary_id))
+            if not os.path.isdir(os.path.join(target_dir, pdb_folder)):
+                os.makedirs(os.path.join(target_dir, pdb_folder))
+            shutil.move(os.path.join(target_dir, identifier, pdbfile),
+                os.path.join(target_dir, pdb_folder, pdbfile))
+            pdb_paths_moved.append(os.path.join(target_dir, pdb_folder, pdbfile))
         for binfile in bins:
             filename = binfile.replace(identifier+"_", "")
             path = f"{assign_path(str(binary_id))}"
-            path = "".join([x for x in path if (x in string.printable and x)])
             try:
                 os.makedirs(f"{target_dir}/{path}")
             except:
                 pass
-            file_name_clean = "".join(
-                [x for x in binfile if (x in string.printable and x)])
+            file_name_clean = "".join([x for x in binfile if x != " "])
             shutil.copy(os.path.join(target_dir, identifier, binfile),
                         os.path.join(target_dir, path, file_name_clean))
             if not os.path.isfile(os.path.join(target_dir, path, file_name_clean)):
@@ -207,6 +212,10 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "optimization": pdbinfo["Optimization"],
                 "size": os.path.getsize(os.path.join(target_dir, path, file_name_clean))//1024
             }
+            pdb_ds.extend([{
+                "binary_id": binary_id,
+                "pdb_path": x} 
+                    for x in pdb_paths_moved])
             binary_rela[filename] = binary_id
             binary_id += 1
             for binary_file in pdbinfo["Binary_info_list"]:
@@ -253,6 +262,8 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 db.bulk_add_lines(line_ds)
             if include_rvas:
                 db.bulk_add_rvas(rva_ds)
+            if include_pdbs:
+                db.bulk_add_pdbs(pdb_ds)
             binary_ds = {}
             function_ds = []
             line_ds = []
@@ -264,5 +275,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         db.bulk_add_lines(line_ds)
     if include_rvas:
         db.bulk_add_rvas(rva_ds)
+    if include_pdbs:
+        db.bulk_add_pdbs(pdb_ds)
     print(
         f"Finished, database location: {dbfile}, binary location: {target_dir}")

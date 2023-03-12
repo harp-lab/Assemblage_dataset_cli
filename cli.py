@@ -17,10 +17,11 @@ import os
 @click.option('--lines', is_flag=True, help='Store lines information in the database')
 @click.option('--functions', is_flag=True, help='Store lines information in the database')
 @click.option('--rvas', is_flag=True, help='Store RVA information in the database')
+@click.option('--pdbs', is_flag=True, help='Store PDB file, takes up additional space')
 
 
 
-def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas):
+def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas, pdbs):
     """Assemblage Dataset Interface"""
     if f:
         assert data
@@ -32,10 +33,7 @@ def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, func
         assert data
         assert dbfile
         runcmd(f"rm -rf {dbfile}")
-        # if slow:
-        #     db_construct_slow(dbfile, data, lines, functions)
-        # else:
-        db_construct(dbfile, data, lines, functions, rvas)
+        db_construct(dbfile, data, lines, functions, rvas, pdbs)
     elif data:
         runcmd(f"rm -rf {dest}")
         process(data, dest)

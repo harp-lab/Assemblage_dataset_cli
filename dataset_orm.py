@@ -61,6 +61,12 @@ class Line(Base):
     source_code = Column(Text)
     function_id = Column(Integer, ForeignKey('functions.id'),)
 
+class PDB(Base):
+    __tablename__ = 'pdbs'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    binary_id = Column(Integer, ForeignKey('binaries.id'),)
+    pdb_path = Column(String(length=128))
+
 
 def init_clean_database(db_str):
     """ init and drop all data in original database """

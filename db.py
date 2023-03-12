@@ -17,7 +17,7 @@ from sqlalchemy.sql.schema import ForeignKey
 from sqlalchemy_utils import create_database, database_exists
 from sqlalchemy.engine import Engine
 from sqlalchemy import event
-from dataset_orm import Binary, Function, Line, Base, init_clean_database, RVA
+from dataset_orm import Binary, Function, Line, Base, init_clean_database, RVA, PDB
 
 class Dataset_DB:
     """ manager for db query and connection """
@@ -97,6 +97,16 @@ class Dataset_DB:
             session.bulk_save_objects(functions_objs, return_defaults=True)
             session.commit()
         return functions_objs
+
+    def bulk_add_pdbs(self, pdbs):
+        """ used to import lot of repos at a time """
+        if not pdbs:
+            return []
+        pdb_dbobjs = [PDB(**msg) for msg in pdbs]
+        with Session(self.engine) as session:
+            session.bulk_save_objects(pdb_dbobjs, return_defaults=True)
+            session.commit()
+        return pdb_dbobjs
 
     def bulk_add_rvas(self, rvas):
         """ used to import lot of repos at a time """
