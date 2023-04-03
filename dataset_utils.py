@@ -55,55 +55,54 @@ def runcmd(cmd):
 def process(zip_path, dest):
     runcmd(f"rm -rf {dest}")
     runcmd(f"mkdir {dest}")
-    print("Sorting files")
-    zipped_files = [x for x in glob.glob(f"{zip_path}/*") if os.path.isfile(x)]
+    print("Unzip files")
+    zipped_files = glob.glob(f"{zip_path}/*.zip")
     for f in tqdm(zipped_files):
-        threading.Thread(target=unzip_process, args=(f, dest)).start()
+        unzip_process(f, dest)
 
 
 def unzip_process(f, dest):
     """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
-    try:
-        with zipfile.ZipFile(f, 'r') as zip_ref:
-            zip_ref.extractall(tmp)
-        if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
-            with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
-                pdb_info_dict = json.load(pdbf)
-            for Binary_info_list in pdb_info_dict["Binary_info_list"]:
-                if len(Binary_info_list["functions"]) == 0:
-                    try:
-                        shutil.rmtree(tmp)
-                    except:
-                        pass
-                    return
-            if glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll") == []:
-                shutil.rmtree(tmp)
-                return
-            for binf in glob.glob(tmp+"/*.exe")+glob.glob(tmp+"/*.dll")+glob.glob(tmp+"/*.pdb"):
-                bin_name = binf.split("/")[-1]
-                plat = pdb_info_dict["Platform"] or "unknown"
-                mode = pdb_info_dict["Build_mode"]
-                toolv = pdb_info_dict["Toolset_version"]
-                opti = pdb_info_dict["Optimization"]
-                github_url = pdb_info_dict["URL"]
-                identifier = get_md5(github_url)[:5] + \
-                    f"_{plat}_{mode}_{toolv}_{opti}"
-                bin_dest = f"{identifier}_{bin_name}"
-                if not os.path.isdir(f"{dest}/{identifier}"):
-                    os.makedirs(f"{dest}/{identifier}")
-                else:
+    with zipfile.ZipFile(f, 'r') as zip_ref:
+        zip_ref.extractall(tmp)
+    if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
+        with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
+            pdb_info_dict = json.load(pdbf)
+        for Binary_info_list in pdb_info_dict["Binary_info_list"]:
+            if len(Binary_info_list["functions"]) == 0:
+                try:
+                    shutil.rmtree(tmp)
+                except:
                     pass
-                if not os.path.isfile(bin_dest):
-                    shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
-            pdbpath = os.path.join(tmp, "pdbinfo.json")
-            shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
-    except:
-        pass
-    try:
-        shutil.rmtree(tmp)
-    except:
-        pass
+                return
+        binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)
+        pdbfiles = glob.glob(tmp+"/**/*.pdb", recursive=True)
+        if len(binfiles)==0:
+            shutil.rmtree(tmp)
+            return
+        plat = pdb_info_dict["Platform"] or "unknown"
+        mode = pdb_info_dict["Build_mode"]
+        toolv = pdb_info_dict["Toolset_version"]
+        opti = pdb_info_dict["Optimization"]
+        github_url = pdb_info_dict["URL"]
+        identifier = get_md5(github_url)[:5] + \
+            f"_{plat}_{mode}_{toolv}_{opti}"
+        if not os.path.isdir(f"{dest}/{identifier}"):
+            os.makedirs(f"{dest}/{identifier}")
+        else:
+            pass
+        for binf in binfiles:
+            bin_name = binf.split("/")[-1]
+            bin_dest = f"{identifier}_{bin_name}"
+            shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
+            assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
+        pdbpath = os.path.join(tmp, "pdbinfo.json")
+        shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
+        assert os.path.isfile(f"{dest}/{identifier}/{identifier}.json")
+    else:
+        runcmd(f"rm -rf {tmp}")
+
 
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
@@ -175,6 +174,8 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     pdb_ds = []
     for identifier in tqdm(os.listdir(target_dir)):
         if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
+            print(f"Skipping {identifier} as it does not have a json file")
+            runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe") or x.lower().endswith(".dll"))]
         pdbs = [x for x in os.listdir(os.path.join(target_dir, identifier)) if x.lower().endswith(".pdb")]
@@ -188,19 +189,21 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 os.makedirs(os.path.join(target_dir, pdb_folder))
             shutil.move(os.path.join(target_dir, identifier, pdbfile),
                 os.path.join(target_dir, pdb_folder, pdbfile))
-            pdb_paths_moved.append(os.path.join(target_dir, pdb_folder, pdbfile))
+            pdb_paths_moved.append(os.path.join(pdb_folder, pdbfile))
         for binfile in bins:
             filename = binfile.replace(identifier+"_", "")
-            path = f"{assign_path(str(binary_id))}"
-            try:
-                os.makedirs(f"{target_dir}/{path}")
-            except:
-                pass
-            file_name_clean = "".join([x for x in binfile if x != " "])
-            shutil.copy(os.path.join(target_dir, identifier, binfile),
+            path = assign_path(str(binary_id))
+            if not os.path.isdir(os.path.join(target_dir, path)):
+                os.makedirs(os.path.join(target_dir, path))
+            # file_name_clean = "".join([x for x in binfile if x != " "])
+            file_name_clean = binfile
+            shutil.move(os.path.join(target_dir, identifier, binfile),
                         os.path.join(target_dir, path, file_name_clean))
-            if not os.path.isfile(os.path.join(target_dir, path, file_name_clean)):
-                continue
+            assert os.path.isfile(os.path.join(target_dir, path, file_name_clean))
+            try:
+                pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:').timetuple()))
+            except:
+                pushed_at = 0
             binary_ds[binary_id] = {
                 "id": binary_id,
                 "github_url": pdbinfo["URL"],
@@ -208,7 +211,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "platform": pdbinfo["Platform"],
                 "build_mode": pdbinfo["Build_mode"],
                 "toolset_version": pdbinfo["Toolset_version"],
-                "pushed_at": int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S').timetuple())),
+                "pushed_at": pushed_at,
                 "optimization": pdbinfo["Optimization"],
                 "size": os.path.getsize(os.path.join(target_dir, path, file_name_clean))//1024
             }

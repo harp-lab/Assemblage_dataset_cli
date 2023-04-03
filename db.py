@@ -32,20 +32,6 @@ class Dataset_DB:
         """ Close DB connection """
         self.engine.dispose()
 
-    def find_binary(self, github_url=None, file_name=None, platform=None, build_mode=None, toolset_version=None, optimization=None):
-        with Session(self.engine) as session:
-            query = select(Binary).where(github_url=github_url,
-                                         file_name=file_name,
-                                         platform=platform,
-                                         build_mode=build_mode,
-                                         toolset_version=toolset_version,
-                                         optimization=optimization)
-            result = session.execute(query).first()
-            statuses = []
-            for _s in result:
-                statuses.append(_s[0])
-            return statuses
-
     def get_binary_by_id(self, bin_id):
         with Session(self.engine) as session:
             query = select(Binary).where(Binary.id == bin_id)
