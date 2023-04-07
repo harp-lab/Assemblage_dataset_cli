@@ -58,8 +58,9 @@ def process(zip_path, dest):
     print("Unzip files")
     zipped_files = glob.glob(f"{zip_path}/*.zip")
     for f in tqdm(zipped_files):
-        unzip_process(f, dest)
-
+        t = threading.Thread(target=unzip_process, args=(f, dest))
+        t.start()
+        # unzip_process(f, dest)
 
 def unzip_process(f, dest):
     """Unzip the file and check if it is a valid zip file"""
@@ -67,8 +68,11 @@ def unzip_process(f, dest):
     with zipfile.ZipFile(f, 'r') as zip_ref:
         zip_ref.extractall(tmp)
     if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
-        with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
-            pdb_info_dict = json.load(pdbf)
+        try:
+            with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
+                pdb_info_dict = json.load(pdbf)
+        except:
+            return
         for Binary_info_list in pdb_info_dict["Binary_info_list"]:
             if len(Binary_info_list["functions"]) == 0:
                 try:
@@ -86,14 +90,15 @@ def unzip_process(f, dest):
         toolv = pdb_info_dict["Toolset_version"]
         opti = pdb_info_dict["Optimization"]
         github_url = pdb_info_dict["URL"]
-        identifier = get_md5(github_url)[:5] + \
-            f"_{plat}_{mode}_{toolv}_{opti}"
-        if not os.path.isdir(f"{dest}/{identifier}"):
-            os.makedirs(f"{dest}/{identifier}")
-        else:
-            pass
-        for binf in binfiles:
-            bin_name = binf.split("/")[-1]
+        for binf in binfiles+pdbfiles:
+            if "x86" in binf:
+                plat = "x86"
+            elif "x64" in binf:
+                plat = "x64"
+            identifier = f"{get_md5(github_url)[:5]}_{plat}_{mode}_{toolv}_{opti}"
+            if not os.path.isdir(f"{dest}/{identifier}"):
+                os.makedirs(f"{dest}/{identifier}")
+            bin_name = os.path.basename(binf)
             bin_dest = f"{identifier}_{bin_name}"
             shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
             assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
@@ -102,7 +107,6 @@ def unzip_process(f, dest):
         assert os.path.isfile(f"{dest}/{identifier}/{identifier}.json")
     else:
         runcmd(f"rm -rf {tmp}")
-
 
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
@@ -183,13 +187,14 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             open(os.path.join(target_dir, identifier, f"{identifier}.json")))
         binary_rela = {}
         pdb_paths_moved = []
-        for pdbfile in pdbs:
-            pdb_folder = assign_path(str(binary_id))
-            if not os.path.isdir(os.path.join(target_dir, pdb_folder)):
-                os.makedirs(os.path.join(target_dir, pdb_folder))
-            shutil.move(os.path.join(target_dir, identifier, pdbfile),
-                os.path.join(target_dir, pdb_folder, pdbfile))
-            pdb_paths_moved.append(os.path.join(pdb_folder, pdbfile))
+        if include_pdbs:
+            for pdbfile in pdbs:
+                pdb_folder = assign_path(str(binary_id))
+                if not os.path.isdir(os.path.join(target_dir, pdb_folder)):
+                    os.makedirs(os.path.join(target_dir, pdb_folder))
+                shutil.move(os.path.join(target_dir, identifier, pdbfile),
+                    os.path.join(target_dir, pdb_folder, pdbfile))
+                pdb_paths_moved.append(os.path.join(pdb_folder, pdbfile))
         for binfile in bins:
             filename = binfile.replace(identifier+"_", "")
             path = assign_path(str(binary_id))

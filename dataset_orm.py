@@ -34,7 +34,7 @@ class Binary(Base):
     build_mode = Column(String(length=8))
     toolset_version = Column(String(length=4))
     github_url = Column(String(length=128))
-    optimization = Column(String(length=2))
+    optimization = Column(String(length=16))
     pushed_at = Column(Integer)
     size = Column(Integer, default=0)
     source_file = Column(String(length=128))
