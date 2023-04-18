@@ -178,7 +178,6 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     pdb_ds = []
     for identifier in tqdm(os.listdir(target_dir)):
         if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
-            print(f"Skipping {identifier} as it does not have a json file")
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe") or x.lower().endswith(".dll"))]
@@ -200,8 +199,10 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             path = assign_path(str(binary_id))
             if not os.path.isdir(os.path.join(target_dir, path)):
                 os.makedirs(os.path.join(target_dir, path))
-            # file_name_clean = "".join([x for x in binfile if x != " "])
-            file_name_clean = binfile
+            file_name_clean = filename
+            while os.path.isfile(os.path.join(target_dir, path, file_name_clean)):
+                binary_id+=1
+                path = assign_path(str(binary_id))
             shutil.move(os.path.join(target_dir, identifier, binfile),
                         os.path.join(target_dir, path, file_name_clean))
             assert os.path.isfile(os.path.join(target_dir, path, file_name_clean))
