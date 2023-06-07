@@ -20,9 +20,28 @@ import shutil
 import logging
 import time
 import re
+import requests
 
 from db import Dataset_DB
 from dataset_orm import *
+
+import os
+
+from elftools.elf.elffile import ELFFile
+from elftools.common.exceptions import ELFError
+
+
+def is_elf_bin(location):
+    if not os.path.isfile(location):
+        return False
+    with open(location, 'rb') as f:
+        try:
+            ef = ELFFile(f)
+            if ef.header['e_type'] == 'ET_EXEC' or ef.header['e_type'] == 'ET_DYN':
+                return True
+        except ELFError:
+            return False
+
 
 TIMEOUT = 15
 checksum_format = r"\s\((MD5|0x3).*\)"
@@ -52,17 +71,17 @@ def runcmd(cmd):
     return stdout, stderr, process.returncode
 
 
-def process(zip_path, dest):
+def process(zip_path, dest, inplace):
     runcmd(f"rm -rf {dest}")
     runcmd(f"mkdir {dest}")
     print("Unzip files")
     zipped_files = glob.glob(f"{zip_path}/*.zip")
     for f in tqdm(zipped_files):
-        t = threading.Thread(target=unzip_process, args=(f, dest))
+        t = threading.Thread(target=unzip_process, args=(f, dest, inplace))
         t.start()
         # unzip_process(f, dest)
 
-def unzip_process(f, dest):
+def unzip_process(f, dest, inplace):
     """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
     with zipfile.ZipFile(f, 'r') as zip_ref:
@@ -105,8 +124,30 @@ def unzip_process(f, dest):
         pdbpath = os.path.join(tmp, "pdbinfo.json")
         shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
         assert os.path.isfile(f"{dest}/{identifier}/{identifier}.json")
-    else:
-        runcmd(f"rm -rf {tmp}")
+    # else:
+    #     #Linux data doesn't have pdbinfo.json
+    #     allfiles = glob.glob(tmp+"/**/*", recursive=True)
+    #     binfiles = []
+    #     identifier = f"{os.urandom(6).hex()}_linux"
+    #     for f in allfiles:
+    #         if is_elf_bin(f):
+    #             binfiles.append(f)
+    #     for binfile in binfiles:
+    #         if not os.path.isdir(f"{dest}/{identifier}"):
+    #             os.makedirs(f"{dest}/{identifier}")
+    #         bin_name = os.path.basename(binfile)
+    #         bin_dest = f"{identifier}_{bin_name}"
+    #         shutil.move(binfile, f"{dest}/{identifier}/{bin_dest}")
+    #         assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
+    #     with open(f"{dest}/{identifier}/{identifier}.json", 'w') as f:
+    #         json.dump({"Platform": "Linux",
+    #                    "Build_mode": "unknown",
+    #                    "Toolset_version": "GCC",
+    #                    "Optimization":"unknown",
+    #                    "URL":"unknown"}, f)
+    runcmd(f"rm -rf {tmp}")
+    if inplace:
+        runcmd(f"rm {f}")
 
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
@@ -288,3 +329,34 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         db.bulk_add_pdbs(pdb_ds)
     print(
         f"Finished, database location: {dbfile}, binary location: {target_dir}")
+    db.shutdown()
+
+def update_license(dbfile):
+    db = Dataset_DB(f"sqlite:///{dbfile}")
+    urls = db.get_all_urls()
+    print("You can put tokens in a file called tokens.txt")
+    if os.path.isfile("tokens.txt"):
+        print("Using tokens.txt")
+        with open("tokens.txt", "r") as f:
+            tokens = [x.strip() for x in f.readlines()]
+    else:
+        tokens = [""]
+    print(tokens)
+    for url in tqdm(urls):
+        username = url.split("/")[3]
+        repository_name = url.split("/")[4]
+        api_url = f"https://api.github.com/repos/{username}/{repository_name}"
+        r = requests.get(api_url, auth=("", random.choice(tokens).strip()))
+        license = ""
+        if r.status_code == 200:
+            if r.json()["license"]:
+                license = r.json()["license"]["key"]
+            else:
+                license = "null"
+        elif "Not Found" in r.text:
+            license = "Not Found"
+        elif "API rate limit" in r.text:
+            time.sleep(10)
+        print(url, license)
+        db.update_license(url, license)
+    db.shutdown()

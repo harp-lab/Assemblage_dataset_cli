@@ -130,6 +130,18 @@ class Dataset_DB:
             q = delete(Binary).where(Binary.id == binary_id)
             session.execute(q)
             session.commit()
+    
+    def update_license(self, url, license):
+        with Session(self.engine) as session:
+            q = update(Binary).where(Binary.github_url == url).values(license=license)
+            session.execute(q)
+            session.commit()
+
+    def get_all_urls(self):
+        with Session(self.engine) as session:
+            query = select(Binary.github_url).where(Binary.license=="").distinct()
+            result = session.execute(query).all()
+            return [res[0] for res in result]
 
     def init(self):
         init_clean_database(self.db_addr)
