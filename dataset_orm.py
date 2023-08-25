@@ -38,6 +38,7 @@ class Binary(Base):
     pushed_at = Column(Integer)
     size = Column(Integer, default=0)
     source_file = Column(String(length=128))
+    # path = Column(String(length=128))
     license = Column(String(length=128), default='')
 
 class Function(Base):
@@ -45,6 +46,7 @@ class Function(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(length=128))
     intersect_ratio = Column(Float)
+    hash = Column(String(length=64))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
 
 class RVA(Base):

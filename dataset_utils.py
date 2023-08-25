@@ -1,14 +1,8 @@
 import os
 import glob
 import random
-import string
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import json
-import random
-import string
-import hashlib
-import json
-import os
 from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,15 +11,13 @@ import math
 import zipfile
 import concurrent.futures
 import shutil
-import logging
 import time
 import re
 import requests
+import pefile
 
 from db import Dataset_DB
 from dataset_orm import *
-
-import os
 
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
@@ -49,9 +41,13 @@ checksum_format = r"\s\((MD5|0x3).*\)"
 def get_md5(s):
     return hashlib.md5(s.encode()).hexdigest()
 
+def get_sha256(bytes):
+    shaobj = hashlib.sha256()
+    shaobj.update(bytes)
+    return shaobj.hexdigest()
 
 def assign_path(s):
-    s = s[::-1]
+    s = str(s)[::-1]
     path_layers = re.findall('.{2}', str(s))
     return os.path.join(*path_layers)
 
@@ -76,10 +72,10 @@ def process(zip_path, dest, inplace):
     runcmd(f"mkdir {dest}")
     print("Unzip files")
     zipped_files = glob.glob(f"{zip_path}/*.zip")
+    threads = []
     for f in tqdm(zipped_files):
-        t = threading.Thread(target=unzip_process, args=(f, dest, inplace))
-        t.start()
-        # unzip_process(f, dest)
+        threading.Thread(target=unzip_process, args=(f, dest, inplace)).start()
+
 
 def unzip_process(f, dest, inplace):
     """Unzip the file and check if it is a valid zip file"""
@@ -240,13 +236,12 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             path = assign_path(str(binary_id))
             if not os.path.isdir(os.path.join(target_dir, path)):
                 os.makedirs(os.path.join(target_dir, path))
-            file_name_clean = filename
-            while os.path.isfile(os.path.join(target_dir, path, file_name_clean)):
+            while os.path.isfile(os.path.join(target_dir, path, filename)):
                 binary_id+=1
                 path = assign_path(str(binary_id))
             shutil.move(os.path.join(target_dir, identifier, binfile),
-                        os.path.join(target_dir, path, file_name_clean))
-            assert os.path.isfile(os.path.join(target_dir, path, file_name_clean))
+                        os.path.join(target_dir, path, filename))
+            assert os.path.isfile(os.path.join(target_dir, path, filename))
             try:
                 pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:').timetuple()))
             except:
@@ -254,13 +249,14 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             binary_ds[binary_id] = {
                 "id": binary_id,
                 "github_url": pdbinfo["URL"],
-                "file_name": file_name_clean,
+                "file_name": filename,
                 "platform": pdbinfo["Platform"],
                 "build_mode": pdbinfo["Build_mode"],
                 "toolset_version": pdbinfo["Toolset_version"],
                 "pushed_at": pushed_at,
                 "optimization": pdbinfo["Optimization"],
-                "size": os.path.getsize(os.path.join(target_dir, path, file_name_clean))//1024
+                "path": os.path.join(path, filename),
+                "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024
             }
             pdb_ds.extend([{
                 "binary_id": binary_id,
@@ -359,4 +355,27 @@ def update_license(dbfile):
             time.sleep(10)
         print(url, license)
         db.update_license(url, license)
+    db.shutdown()
+
+def update_hash(dbfile, dataset_path):
+    print("Adding hash to each functions")
+    db = Dataset_DB(f"sqlite:///{dbfile}")
+    for bin_obj in tqdm(db.get_all_bins()):
+    # for bin_obj in [Binary(id=100, file_name="PaintDLL.dll")]:
+        bindir = assign_path(bin_obj.id)
+        binpath = os.path.join(dataset_path, bindir, bin_obj.file_name)
+        pe_obj = pefile.PE(binpath, fast_load=1)
+        mapped_memory = pe_obj.get_memory_mapped_image()
+        if not os.path.isfile(binpath):
+            print("Error file not existing", binpath)
+        for func in db.get_func_by_binid(bin_obj.id):
+            if func.hash!="":
+                continue
+            func_bytes = []
+            for rva_block in db.get_rva_by_funcid(func.id):
+                start_rva = rva_block.start
+                end_rva = rva_block.end
+                func_bytes.append(mapped_memory[start_rva:end_rva])
+            sha256 = get_sha256(b"".join(func_bytes))
+            db.update_func_hash(func.id, sha256)
     db.shutdown()

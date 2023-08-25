@@ -143,5 +143,32 @@ class Dataset_DB:
             result = session.execute(query).all()
             return [res[0] for res in result]
 
+    def get_all_bins(self):
+        with Session(self.engine) as session:
+            query = select(Binary)
+            result = session.execute(query).all()
+            for res in result:
+                yield res[0]
+
+    def get_func_by_binid(self, binid):
+        with Session(self.engine) as session:
+            query = select(Function).where(Function.binary_id==binid)
+            result = session.execute(query).all()
+            for res in result:
+                yield res[0]
+
+    def get_rva_by_funcid(self, funcid):
+        with Session(self.engine) as session:
+            query = select(RVA).where(RVA.function_id==funcid)
+            result = session.execute(query).all()
+            for res in result:
+                yield res[0]
+    
+    def update_func_hash(self, funcid, hashval):
+        with Session(self.engine) as session:
+            q = update(Function).where(Function.id == funcid).values(hash=hashval)
+            session.execute(q)
+            session.commit()
+
     def init(self):
         init_clean_database(self.db_addr)
