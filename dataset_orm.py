@@ -38,7 +38,7 @@ class Binary(Base):
     pushed_at = Column(Integer)
     size = Column(Integer, default=0)
     source_file = Column(String(length=128))
-    # path = Column(String(length=128))
+    path = Column(String(length=128))
     license = Column(String(length=128), default='')
 
 class Function(Base):

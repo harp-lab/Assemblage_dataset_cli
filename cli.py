@@ -26,29 +26,29 @@ import os
 
 def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas, pdbs, inplace, addlicense, addhash):
     """Assemblage Dataset Interface"""
-    if f:
-        assert data
-        assert dest
-        assert uppersize
-        assert lowersize
-        filter_size(data, dest, uppersize, lowersize, amount)
+    # if f:
+    #     assert data
+    #     assert dest
+    #     assert uppersize
+    #     assert lowersize
+    #     filter_size(data, dest, uppersize, lowersize, amount)
     if g:
         assert data
         assert dbfile
         runcmd(f"rm -rf {dbfile}")
         db_construct(dbfile, data, lines, functions, rvas, pdbs)
-    elif s3:
-        runcmd(f"mkdir {dest}")
-        os.system(f"aws s3 cp s3://assemblage-data/platform/windows/ ./{dest} --recursive")
+    # elif s3:
+    #     runcmd(f"mkdir {dest}")
+    #     os.system(f"aws s3 cp s3://assemblage-data/platform/windows/ ./{dest} --recursive")
     elif addlicense:
         assert dbfile
         update_license(dbfile)
-    elif addhash:
-        assert dbfile
-        assert data
-        update_hash(dbfile, data)
+    # elif addhash:
+    #     assert dbfile
+    #     assert data
+    #     update_hash(dbfile, data)
     elif data and not addhash:
-        process(data, dest, inplace)
+        process(data, dest, False)
 
 
 if __name__ == '__main__':

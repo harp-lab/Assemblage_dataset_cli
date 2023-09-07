@@ -15,13 +15,16 @@ import time
 import re
 import requests
 import pefile
-
+import logging
 from db import Dataset_DB
 from dataset_orm import *
 
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
 
+logging.basicConfig(format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                    datefmt='%H:%M:%S',
+                    level=logging.INFO)
 
 def is_elf_bin(location):
     if not os.path.isfile(location):
@@ -74,14 +77,17 @@ def process(zip_path, dest, inplace):
     zipped_files = glob.glob(f"{zip_path}/*.zip")
     threads = []
     for f in tqdm(zipped_files):
-        threading.Thread(target=unzip_process, args=(f, dest, inplace)).start()
-
+        # threading.Thread(target=unzip_process, args=(f, dest, inplace)).start()
+        unzip_process(f, dest, inplace)
 
 def unzip_process(f, dest, inplace):
     """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
-    with zipfile.ZipFile(f, 'r') as zip_ref:
-        zip_ref.extractall(tmp)
+    try:
+        with zipfile.ZipFile(f, 'r') as zip_ref:
+            zip_ref.extractall(tmp)
+    except:
+        return
     if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
         try:
             with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
@@ -120,30 +126,7 @@ def unzip_process(f, dest, inplace):
         pdbpath = os.path.join(tmp, "pdbinfo.json")
         shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
         assert os.path.isfile(f"{dest}/{identifier}/{identifier}.json")
-    # else:
-    #     #Linux data doesn't have pdbinfo.json
-    #     allfiles = glob.glob(tmp+"/**/*", recursive=True)
-    #     binfiles = []
-    #     identifier = f"{os.urandom(6).hex()}_linux"
-    #     for f in allfiles:
-    #         if is_elf_bin(f):
-    #             binfiles.append(f)
-    #     for binfile in binfiles:
-    #         if not os.path.isdir(f"{dest}/{identifier}"):
-    #             os.makedirs(f"{dest}/{identifier}")
-    #         bin_name = os.path.basename(binfile)
-    #         bin_dest = f"{identifier}_{bin_name}"
-    #         shutil.move(binfile, f"{dest}/{identifier}/{bin_dest}")
-    #         assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
-    #     with open(f"{dest}/{identifier}/{identifier}.json", 'w') as f:
-    #         json.dump({"Platform": "Linux",
-    #                    "Build_mode": "unknown",
-    #                    "Toolset_version": "GCC",
-    #                    "Optimization":"unknown",
-    #                    "URL":"unknown"}, f)
     runcmd(f"rm -rf {tmp}")
-    if inplace:
-        runcmd(f"rm {f}")
 
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
@@ -196,16 +179,17 @@ def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
         else:
             runcmd(f"rm -r {dest_path}/{folder}")
 
+# Actual function to construct the database
 
 def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
-    print("Creating database")
+    logging.info("Creating database")
     try:
         os.remove(dbfile)
     except:
         pass
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
-    print("Writing data to database")
+    logging.info("Sorting files")
     binary_id = 100
     function_id = 1
     binary_ds = {}
@@ -213,7 +197,10 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     line_ds = []
     rva_ds = []
     pdb_ds = []
-    for identifier in tqdm(os.listdir(target_dir)):
+    for idx, identifier in enumerate(os.listdir(target_dir)):
+        if len(identifier)<=3:
+            continue
+        logging.info("Adding %s %s", idx, identifier)
         if not os.path.isfile(os.path.join(target_dir, identifier, f"{identifier}.json")):
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
@@ -256,7 +243,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "pushed_at": pushed_at,
                 "optimization": pdbinfo["Optimization"],
                 "path": os.path.join(path, filename),
-                "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024
+                "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
             }
             pdb_ds.extend([{
                 "binary_id": binary_id,
@@ -265,27 +252,33 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             binary_rela[filename] = binary_id
             binary_id += 1
             for binary_file in pdbinfo["Binary_info_list"]:
-                if filename == binary_file["file"].replace("\\", "/").split("/")[-1]:
+                logging.info("checking file %s", binary_file["file"])
+
+                pe_obj = pefile.PE(os.path.join(target_dir, path, filename), fast_load=1)
+                mapped_memory = pe_obj.get_memory_mapped_image()
+
+                if filename in binary_file["file"].replace("\\", "/").split("/")[-1]:
                     bin_id = binary_rela[filename]
                     if len(binary_file["functions"]) == 0:
                         del binary_ds[bin_id]
                         continue
-                    for function_info in binary_file["functions"]:
+                    for function_info in tqdm(binary_file["functions"]):
                         function_name = function_info["function_name"]
                         intersect_ratio = max(float((function_info["intersect_ratio"].replace("%", "")))/100, 0)
                         source_file = re.sub(checksum_format, "", function_info["source_file"])
-                        rva_ds.extend([{
-                            "start": int(x['rva_start'], 16),
-                            "end": int(x['rva_end'], 16),
-                            "function_id": function_id,
-                        } for x in function_info["function_info"]])
-
+                        rvablocks = [{
+                                        "start": int(x['rva_start'], 16),
+                                        "end": int(x['rva_end'], 16),
+                                        "function_id": function_id,
+                                    } for x in function_info["function_info"]]
+                        for rvablock in rvablocks:
+                            rva_ds.append(rvablock)
                         function_ds.append({
                             "name": function_name,
                             "intersect_ratio": intersect_ratio,
                             "binary_id": bin_id,
-                            "id": function_id
-                        })
+                            "id": function_id,
+                            "hash": get_hash_bin_rva(mapped_memory, [[x["start"], x["end"]] for x in rvablocks if x["function_id"]==function_id])})
                         binary_ds[bin_id]["source_file"] = source_file
                         for line_info in function_info["lines"]:
                             line_number = line_info["line_number"]
@@ -300,7 +293,8 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                                 "function_id": function_id})
                         function_id += 1
         runcmd(f"rm -rf {target_dir}/{identifier}")
-        if len(binary_ds) > 10000:
+        # Flush database
+        if len(binary_ds) > 50000:
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
                 db.bulk_add_functions(function_ds)
@@ -356,6 +350,18 @@ def update_license(dbfile):
         print(url, license)
         db.update_license(url, license)
     db.shutdown()
+
+def get_hash_bin_rva(mapped_memory, rvablocks):
+    func_bytes = []
+    shaobj = hashlib.sha256()
+    
+    for rva_block in rvablocks:
+        start_rva = rva_block[0]
+        end_rva = rva_block[1]
+        shaobj.update(mapped_memory[start_rva:end_rva])
+        # Only hash first chunck of bytes
+        return shaobj.hexdigest()
+
 
 def update_hash(dbfile, dataset_path):
     print("Adding hash to each functions")
