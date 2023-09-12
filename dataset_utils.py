@@ -18,6 +18,7 @@ import pefile
 import logging
 from db import Dataset_DB
 from dataset_orm import *
+from multiprocessing import Pool
 
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
@@ -73,14 +74,14 @@ def runcmd(cmd):
 def process(zip_path, dest, inplace):
     runcmd(f"rm -rf {dest}")
     runcmd(f"mkdir {dest}")
-    print("Unzip files")
+    print("Checking all files")
     zipped_files = glob.glob(f"{zip_path}/*.zip")
-    threads = []
-    for f in tqdm(zipped_files):
-        # threading.Thread(target=unzip_process, args=(f, dest, inplace)).start()
-        unzip_process(f, dest, inplace)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        for f in tqdm(zipped_files):
+            executor.submit(unzip_process, f, dest)
 
-def unzip_process(f, dest, inplace):
+
+def unzip_process(f, dest):
     """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
     try:
@@ -127,6 +128,7 @@ def unzip_process(f, dest, inplace):
         shutil.move(pdbpath, f"{dest}/{identifier}/{identifier}.json")
         assert os.path.isfile(f"{dest}/{identifier}/{identifier}.json")
     runcmd(f"rm -rf {tmp}")
+    print(f"{dest}/{identifier}")
 
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
@@ -180,14 +182,10 @@ def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
             runcmd(f"rm -r {dest_path}/{folder}")
 
 # Actual function to construct the database
-
 def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
     logging.info("Creating database")
-    try:
-        os.remove(dbfile)
-    except:
-        pass
-    init_clean_database(f"sqlite:///{dbfile}")
+    if not os.path.isfile(dbfile):
+        init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
     logging.info("Sorting files")
     binary_id = 100
@@ -257,14 +255,13 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 pe_obj = pefile.PE(os.path.join(target_dir, path, filename), fast_load=1)
                 mapped_memory = pe_obj.get_memory_mapped_image()
 
-                if filename in binary_file["file"].replace("\\", "/").split("/")[-1]:
+                if filename in binary_file["file"]:
                     bin_id = binary_rela[filename]
                     if len(binary_file["functions"]) == 0:
                         del binary_ds[bin_id]
                         continue
-                    for function_info in tqdm(binary_file["functions"]):
+                    for function_info in binary_file["functions"]:
                         function_name = function_info["function_name"]
-                        intersect_ratio = max(float((function_info["intersect_ratio"].replace("%", "")))/100, 0)
                         source_file = re.sub(checksum_format, "", function_info["source_file"])
                         rvablocks = [{
                                         "start": int(x['rva_start'], 16),
@@ -275,26 +272,26 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                             rva_ds.append(rvablock)
                         function_ds.append({
                             "name": function_name,
-                            "intersect_ratio": intersect_ratio,
                             "binary_id": bin_id,
                             "id": function_id,
-                            "hash": get_hash_bin_rva(mapped_memory, [[x["start"], x["end"]] for x in rvablocks if x["function_id"]==function_id])})
+                            "hash": get_hash_bin_rva(mapped_memory, [[x["start"], x["end"]] for x in rvablocks])})
                         binary_ds[bin_id]["source_file"] = source_file
-                        for line_info in function_info["lines"]:
-                            line_number = line_info["line_number"]
-                            length = line_info["length"]
-                            source_code = line_info["source_code"]
-                            if "source_file" in line_info:
-                                source_file = re.sub(checksum_format, "", line_info["source_file"])
-                            line_ds.append({
-                                "line_number": line_number,
-                                "length": length,
-                                "source_code": source_code,
-                                "function_id": function_id})
+                        if include_lines:
+                            for line_info in function_info["lines"]:
+                                line_number = line_info["line_number"]
+                                length = line_info["length"]
+                                source_code = line_info["source_code"]
+                                if "source_file" in line_info:
+                                    source_file = re.sub(checksum_format, "", line_info["source_file"])
+                                line_ds.append({
+                                    "line_number": line_number,
+                                    "length": length,
+                                    "source_code": source_code,
+                                    "function_id": function_id})
                         function_id += 1
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
-        if len(binary_ds) > 50000:
+        if len(binary_ds) > 10000:
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
                 db.bulk_add_functions(function_ds)
@@ -354,34 +351,11 @@ def update_license(dbfile):
 def get_hash_bin_rva(mapped_memory, rvablocks):
     func_bytes = []
     shaobj = hashlib.sha256()
-    
+    rvablocks.sort(key=lambda x:x[0])
     for rva_block in rvablocks:
         start_rva = rva_block[0]
         end_rva = rva_block[1]
         shaobj.update(mapped_memory[start_rva:end_rva])
-        # Only hash first chunck of bytes
+        print(shaobj.hexdigest())
         return shaobj.hexdigest()
 
-
-def update_hash(dbfile, dataset_path):
-    print("Adding hash to each functions")
-    db = Dataset_DB(f"sqlite:///{dbfile}")
-    for bin_obj in tqdm(db.get_all_bins()):
-    # for bin_obj in [Binary(id=100, file_name="PaintDLL.dll")]:
-        bindir = assign_path(bin_obj.id)
-        binpath = os.path.join(dataset_path, bindir, bin_obj.file_name)
-        pe_obj = pefile.PE(binpath, fast_load=1)
-        mapped_memory = pe_obj.get_memory_mapped_image()
-        if not os.path.isfile(binpath):
-            print("Error file not existing", binpath)
-        for func in db.get_func_by_binid(bin_obj.id):
-            if func.hash!="":
-                continue
-            func_bytes = []
-            for rva_block in db.get_rva_by_funcid(func.id):
-                start_rva = rva_block.start
-                end_rva = rva_block.end
-                func_bytes.append(mapped_memory[start_rva:end_rva])
-            sha256 = get_sha256(b"".join(func_bytes))
-            db.update_func_hash(func.id, sha256)
-    db.shutdown()

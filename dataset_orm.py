@@ -45,7 +45,6 @@ class Function(Base):
     __tablename__ = 'functions'
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(length=128))
-    intersect_ratio = Column(Float)
     hash = Column(String(length=64))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
 

@@ -63,11 +63,10 @@ class Dataset_DB:
             session.commit()
         return binaries_objs
 
-    def add_function(self, name, source_file, intersect_ratio, rvas, binary_id):
+    def add_function(self, name, source_file, rvas, binary_id):
         with Session(self.engine) as session:
             new_function = Function(name=name,
                                     source_file=source_file,
-                                    intersect_ratio=intersect_ratio,
                                     rvas=rvas,
                                     binary_id=binary_id)
             session.add(new_function)

@@ -1,5 +1,5 @@
 import click
-from dataset_utils import process, runcmd, db_construct, filter_size, update_license, update_hash
+from dataset_utils import process, runcmd, db_construct, filter_size, update_license
 import random
 import os
 
@@ -20,34 +20,19 @@ import os
 @click.option('--inplace', is_flag=True, help='Delete zip file while processing')
 # Todo: merge legacy operations to one command
 @click.option('--addlicense', is_flag=True, help='Update license information in database')
-@click.option('--addhash', is_flag=True, help='Update license information in database')
 
 
 
-def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas, pdbs, inplace, addlicense, addhash):
+def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas, pdbs, inplace, addlicense):
     """Assemblage Dataset Interface"""
-    # if f:
-    #     assert data
-    #     assert dest
-    #     assert uppersize
-    #     assert lowersize
-    #     filter_size(data, dest, uppersize, lowersize, amount)
     if g:
         assert data
         assert dbfile
-        runcmd(f"rm -rf {dbfile}")
         db_construct(dbfile, data, lines, functions, rvas, pdbs)
-    # elif s3:
-    #     runcmd(f"mkdir {dest}")
-    #     os.system(f"aws s3 cp s3://assemblage-data/platform/windows/ ./{dest} --recursive")
     elif addlicense:
         assert dbfile
         update_license(dbfile)
-    # elif addhash:
-    #     assert dbfile
-    #     assert data
-    #     update_hash(dbfile, data)
-    elif data and not addhash:
+    elif data:
         process(data, dest, False)
 
 
