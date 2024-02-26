@@ -1,2 +1,6 @@
 *windows*
 *.ipynb
+*zip*
+*data*
+*linux*
+vcpkg
