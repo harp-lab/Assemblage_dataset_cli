@@ -124,9 +124,12 @@ class Dataset_DB:
             session.commit()
         return objs
 
-    def delete_binary(self, binary_id):
+    def delete_binary(self, binary_id, filepath=None):
         with Session(self.engine) as session:
-            q = delete(Binary).where(Binary.id == binary_id)
+            if filepath:
+                q = delete(Binary).where(Binary.path==filepath)
+            else:
+                q = delete(Binary).where(Binary.id==binary_id)
             session.execute(q)
             session.commit()
     

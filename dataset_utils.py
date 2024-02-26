@@ -71,23 +71,23 @@ def runcmd(cmd):
 
 
 def process(zip_path, dest, inplace):
-    runcmd(f"rm -rf {dest}")
-    runcmd(f"mkdir {dest}")
     print("Checking all files")
-    zipped_files = glob.glob(f"{zip_path}/*.zip")
-    pool = Pool(processes=64)
+    zipped_files = glob.glob(f"{zip_path}/**/*.zip", recursive=1)
+    print(len(zipped_files), 'found')
+    pool = Pool(processes=128)
     for f in zipped_files:
-        pool.apply_async(unzip_process, args=(f, dest, ))
+        pool.apply_async(unzip_process, args=(f, dest, inplace, ))
     pool.close()
     pool.join()
 
-def unzip_process(f, dest):
+def unzip_process(f, dest, inplace):
     """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
     try:
         with zipfile.ZipFile(f, 'r') as zip_ref:
             zip_ref.extractall(tmp)
-    except:
+    except Exception as e:
+        print(e)
         return
     if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
         try:
@@ -95,13 +95,6 @@ def unzip_process(f, dest):
                 pdb_info_dict = json.load(pdbf)
         except:
             return
-        # for Binary_info_list in pdb_info_dict["Binary_info_list"]:
-        #     if len(Binary_info_list["functions"]) == 0:
-        #         try:
-        #             shutil.rmtree(tmp)
-        #         except:
-        #             pass
-        #         return
         binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)
         for f in glob.glob(tmp+"/**/*", recursive=True):
             if is_elf_bin(f):
@@ -110,16 +103,19 @@ def unzip_process(f, dest):
         if len(binfiles)==0:
             shutil.rmtree(tmp)
             return
-        plat = pdb_info_dict["Platform"] or "unknown"
+        plat = pdb_info_dict["Platform"] if "Platform" in pdb_info_dict else ""
         mode = pdb_info_dict["Build_mode"]
-        toolv = pdb_info_dict["Toolset_version"] if "Toolset_version" in pdb_info_dict else "GCC"
+        toolv = pdb_info_dict["Toolset_version"] if "Toolset_version" in pdb_info_dict else "?"
+        if toolv.lower() in ['gcc', 'clang']:
+            plat = "Linux"
+        pdb_info_dict["Toolset_version"] = toolv
         opti = pdb_info_dict["Optimization"]
         github_url = pdb_info_dict["URL"]
         for binf in binfiles+pdbfiles:
             if "x86" in binf:
-                plat = "x86"
+                plat = "Windows_x86"
             elif "x64" in binf:
-                plat = "x64"
+                plat = "Windows_x64"
             identifier = f"{get_md5(github_url)}_{plat}_{mode}_{toolv}_{opti}"
             if not os.path.isdir(f"{dest}/{identifier}"):
                 os.makedirs(f"{dest}/{identifier}")
@@ -127,12 +123,9 @@ def unzip_process(f, dest):
             bin_dest = f"{identifier}_{bin_name}"
             shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
             assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
-        pdbpath = os.path.join(tmp, "pdbinfo.json")
-        shutil.move(pdbpath, f"{dest}/{identifier}/pdbinfo.json")
-        assert os.path.isfile(f"{dest}/{identifier}/pdbinfo.json")
+        json.dump(pdb_info_dict, f"{dest}/{identifier}/pdbinfo.json")
     runcmd(f"rm -rf {tmp}")
-    # addr_convert(f"{dest}/{identifier}")
-    print(f"{dest}/{identifier}")
+
 
 
 def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
@@ -188,7 +181,6 @@ def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
 # Actual function to construct the database
 def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
     logging.info("Creating database")
-    os.system(f"rm {dbfile}")
     init_clean_database(f"sqlite:///{dbfile}")
     db = Dataset_DB(f"sqlite:///{dbfile}")
     logging.info("Sorting files")
@@ -199,7 +191,9 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     line_ds = []
     rva_ds = []
     pdb_ds = []
-    for idx, identifier in enumerate(os.listdir(target_dir)):
+    for identifier in tqdm(os.listdir(target_dir)):
+        if len(identifier) == 2:
+            continue
         if not os.path.isfile(os.path.join(target_dir, identifier, "pdbinfo.json")):
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
@@ -211,6 +205,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             pdbinfo = json.load(
                 open(os.path.join(target_dir, identifier, "pdbinfo.json")))
         except:
+            runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         binary_rela = {}
         pdb_paths_moved = []
@@ -225,17 +220,22 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         for binfile in bins:
             binary_id += 1
             filename = binfile.replace(identifier+"_", "")
-            print(binary_id, filename)
             path = assign_path(str(binary_id))
             if not os.path.isdir(os.path.join(target_dir, path)):
+                if os.path.isfile(os.path.join(target_dir, path)):
+                    os.remove(os.path.join(target_dir, path))
+                    db.delete_binary("?", path)
                 os.makedirs(os.path.join(target_dir, path))
-            while os.path.isfile(os.path.join(target_dir, path, filename)):
-                binary_id += 1
+            old_id = binary_id
+            for binary_id in range(old_id, old_id+10000):
                 path = assign_path(str(binary_id))
+                if not os.path.isfile(os.path.join(target_dir, path, filename)):
+                    break
             try:
                 shutil.move(os.path.join(target_dir, identifier, binfile),
                     os.path.join(target_dir, path, filename))
             except:
+                print(f"Error moving {os.path.join(target_dir, identifier, binfile)} to {os.path.join(target_dir, path, filename)}")
                 continue
             assert os.path.isfile(os.path.join(target_dir, path, filename))
             try:
@@ -268,10 +268,6 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
 
                         if filename in binary_file["file"]:
                             bin_id = binary_rela[filename]
-                            # if len(binary_file["functions"]) == 0:
-                            #     if bin_id in binary_ds:
-                            #         del binary_ds[bin_id]
-
                             for function_info in binary_file["functions"]:
                                 function_name = function_info["function_name"]
                                 source_file = ""
@@ -305,7 +301,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                         continue
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
-        if len(binary_ds) > 10000:
+        if len(binary_ds) > 1000:
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
                 db.bulk_add_functions(function_ds)
@@ -328,8 +324,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         db.bulk_add_rvas(rva_ds)
     if include_pdbs:
         db.bulk_add_pdbs(pdb_ds)
-    print(
-        f"Finished, database location: {dbfile}, binary location: {target_dir}")
+    print(f"Finished database location: {dbfile}, binary location: {target_dir}")
     db.shutdown()
 
 def update_license(dbfile):

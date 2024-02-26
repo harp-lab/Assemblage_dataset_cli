@@ -33,7 +33,7 @@ def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, func
         assert dbfile
         update_license(dbfile)
     elif data:
-        process(data, dest, False)
+        process(data, dest, inplace)
 
 
 if __name__ == '__main__':
