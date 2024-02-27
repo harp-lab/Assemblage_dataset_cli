@@ -37,17 +37,20 @@ def is_elf_bin(location):
         except ELFError:
             return False
 
+def sha256sum(filename):
+    h  = hashlib.sha256()
+    b  = bytearray(128*1024)
+    mv = memoryview(b)
+    with open(filename, 'rb', buffering=0) as f:
+        while n := f.readinto(mv):
+            h.update(mv[:n])
+    return h.hexdigest()
 
 TIMEOUT = 15
 checksum_format = r"\s\((MD5|0x3).*\)"
 
 def get_md5(s):
     return hashlib.md5(s.encode()).hexdigest()
-
-def get_sha256(bytes):
-    shaobj = hashlib.sha256()
-    shaobj.update(bytes)
-    return shaobj.hexdigest()
 
 def assign_path(s):
     s = str(s)[::-1]
@@ -127,57 +130,6 @@ def unzip_process(f, dest, inplace):
     runcmd(f"rm -rf {tmp}")
 
 
-
-def filter_size(size_upper, size_lower, file_limit, binpath, dest_path):
-    binpath = os.path.join(binpath, "bins")
-    print("Filtering files")
-    if not file_limit:
-        file_limit = math.inf
-    if not size_lower:
-        size_lower = 0
-    if not size_upper:
-        size_upper = math.inf
-    for f in tqdm(os.listdir(binpath)):
-        bts = os.path.getsize(os.path.join(binpath, f))
-        kb = bts/1024
-        if kb >= size_lower and kb <= size_upper:
-            runcmd(
-                f"cp {os.path.join(binpath, f)} {os.path.join(dest_path, f)}")
-            file_limit -= 1
-        if not file_limit:
-            break
-    print(f"Copying files")
-    for f in tqdm(os.listdir(dest_path)):
-        urlmd5 = f.split("_")[0]
-        runcmd(f"cp {binpath.replace('/bins','')}/jsons/{urlmd5}* {dest_path}")
-    print("Copying pdb files")
-    for f in tqdm(os.listdir(dest_path)):
-        if f.endswith("json"):
-            with open(os.path.join(dest_path, f)) as fhandler:
-                pdb = json.load(fhandler)
-            plat = pdb["Platform"]
-            mode = pdb["Build_mode"]
-            toolv = pdb["Toolset_version"]
-            md5 = get_md5(pdb["URL"])
-            opti = pdb["Optimization"]
-            bin_prefix = f"{md5}_{plat}_{mode}_{toolv}_{opti}"
-            try:
-                os.makedirs(os.path.join(dest_path, bin_prefix))
-            except:
-                pass
-            for x in os.listdir(dest_path):
-                if x.startswith(bin_prefix) and (x.endswith("exe") or x.endswith("dll")):
-                    runcmd(
-                        f"mv {dest_path}/{x} {os.path.join(dest_path, bin_prefix)}/{x}")
-            runcmd(f"mv {dest_path}/{f} {os.path.join(dest_path, bin_prefix)}")
-    for folder in os.listdir(dest_path):
-        if os.path.isdir(f"{dest_path}/{folder}"):
-            files = os.listdir(f"{dest_path}/{folder}")
-            if len(files) < 2:
-                runcmd(f"rm -r {dest_path}/{folder}")
-        else:
-            runcmd(f"rm -r {dest_path}/{folder}")
-
 # Actual function to construct the database
 def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
     logging.info("Creating database")
@@ -254,6 +206,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "optimization": pdbinfo["Optimization"] if "Optimization" in pdbinfo else pdbinfo["flags"],
                 "path": os.path.join(path, filename),
                 "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
+                "hash": sha256sum(os.path.join(target_dir, path, filename))
             }
             pdb_ds.extend([{
                 "binary_id": binary_id,
@@ -324,8 +277,27 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         db.bulk_add_rvas(rva_ds)
     if include_pdbs:
         db.bulk_add_pdbs(pdb_ds)
-    print(f"Finished database location: {dbfile}, binary location: {target_dir}")
     db.shutdown()
+
+    print("Checking files")
+    connection = sqlite3.connect(dbfile)
+    cursor = connection.cursor()
+    full_paths = []
+    paths = cursor.execute('SELECT id, path FROM binaries')
+    for b_id, path in tqdm(paths):
+        full_path = os.path.join(target_dir, path)
+        assert os.path.isfile(full_path)
+        full_paths.append(full_path)
+    files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True) if os.path.isfile(x)]
+    count = 0
+    for x in tqdm(files):
+        if x not in full_paths:
+            os.remove(x)
+        else:
+            count += 1
+    print(f"Finished database location: {dbfile}, binary location: {target_dir}")
+
+
 
 def update_license(dbfile):
     db = Dataset_DB(f"sqlite:///{dbfile}")

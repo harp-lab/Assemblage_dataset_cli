@@ -1,5 +1,5 @@
 import click
-from dataset_utils import process, runcmd, db_construct, filter_size, update_license
+from dataset_utils import process, runcmd, db_construct, update_license
 import random
 import os
 

@@ -40,6 +40,7 @@ class Binary(Base):
     source_file = Column(String(length=128))
     path = Column(String(length=128))
     license = Column(String(length=128), default='')
+    hash = Column(String(length=16))
 
 class Function(Base):
     __tablename__ = 'functions'
