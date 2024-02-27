@@ -71,7 +71,6 @@ class PDB(Base):
 
 
 def init_clean_database(db_str):
-    """ init and drop all data in original database """
     try:
         engine = create_engine(db_str)
     except Exception as err:
