@@ -34,10 +34,9 @@ class Binary(Base):
     build_mode = Column(String(length=8))
     toolset_version = Column(String(length=4))
     github_url = Column(String(length=128))
-    optimization = Column(String(length=16))
-    pushed_at = Column(Integer)
+    optimization = Column(String(length=4))
+    repo_last_update = Column(Integer)
     size = Column(Integer, default=0)
-    source_file = Column(String(length=128))
     path = Column(String(length=128))
     license = Column(String(length=128), default='')
     hash = Column(String(length=16))
@@ -46,7 +45,7 @@ class Function(Base):
     __tablename__ = 'functions'
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(length=128))
-    hash = Column(String(length=64))
+    hash = Column(String(length=16))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
 
 class RVA(Base):
@@ -60,7 +59,7 @@ class Line(Base):
     __tablename__ = 'lines'
     id = Column(Integer, primary_key=True, autoincrement=True)
     line_number = Column(Integer)
-    length = Column(Integer)
+    source_file = Column(String(length=64))
     source_code = Column(Text)
     function_id = Column(Integer, ForeignKey('functions.id'),)
 

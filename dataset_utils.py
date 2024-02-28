@@ -14,11 +14,13 @@ import re
 import requests
 import pefile
 import logging
+import sqlite3
+import json
+import pefile
+
 from db import Dataset_DB
 from dataset_orm import *
 from multiprocessing import Pool
-import json
-import pefile
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
 
@@ -191,7 +193,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 continue
             assert os.path.isfile(os.path.join(target_dir, path, filename))
             try:
-                pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:').timetuple()))
+                pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S').timetuple()))
             except:
                 pushed_at = 0
             assert binary_id not in binary_ds
@@ -223,7 +225,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                             bin_id = binary_rela[filename]
                             for function_info in binary_file["functions"]:
                                 function_name = function_info["function_name"]
-                                source_file = ""
+                                source_file = None
                                 rvablocks = [{
                                                 "start": int(x['rva_start'], 16),
                                                 "end": int(x['rva_end'], 16),
@@ -244,17 +246,18 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                                         source_code = line_info["source_code"]
                                         if "source_file" in line_info:
                                             source_file = re.sub(checksum_format, "", line_info["source_file"])
-                                        line_ds.append({
-                                            "line_number": line_number,
-                                            "length": length,
-                                            "source_code": source_code,
-                                            "function_id": function_id})
+                                        if source_code:
+                                            line_ds.append({
+                                                "line_number": line_number,
+                                                "source_file": source_file,
+                                                "source_code": source_code,
+                                                "function_id": function_id})
                                 function_id += 1
                     except:
                         continue
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
-        if len(binary_ds) > 1000:
+        if len(binary_ds) > 10000:
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
                 db.bulk_add_functions(function_ds)
@@ -283,18 +286,15 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     connection = sqlite3.connect(dbfile)
     cursor = connection.cursor()
     full_paths = []
-    paths = cursor.execute('SELECT id, path FROM binaries')
-    for b_id, path in tqdm(paths):
+    paths = cursor.execute('SELECT path FROM binaries')
+    for path in tqdm(paths):
         full_path = os.path.join(target_dir, path)
         assert os.path.isfile(full_path)
         full_paths.append(full_path)
-    files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True) if os.path.isfile(x)]
-    count = 0
+    files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True)]
     for x in tqdm(files):
-        if x not in full_paths:
+        if os.path.isfile(x) and x not in full_paths:
             os.remove(x)
-        else:
-            count += 1
     print(f"Finished database location: {dbfile}, binary location: {target_dir}")
 
 
