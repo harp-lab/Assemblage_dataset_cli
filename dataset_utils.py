@@ -192,10 +192,16 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 print(f"Error moving {os.path.join(target_dir, identifier, binfile)} to {os.path.join(target_dir, path, filename)}")
                 continue
             assert os.path.isfile(os.path.join(target_dir, path, filename))
-            try:
-                pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S').timetuple()))
-            except:
-                pushed_at = 0
+            if "Pushed_at" in pdbinfo:
+                try:
+                    pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["Pushed_at"], '%m/%d/%Y, %H:%M:%S').timetuple()))
+                except:
+                    pushed_at = 0
+            else:
+                try:
+                    pushed_at = int(time.mktime(datetime.datetime.strptime(pdbinfo["updated_at"], '%m/%d/%Y, %H:%M:%S').timetuple()))
+                except:
+                    pushed_at = 0
             assert binary_id not in binary_ds
             binary_ds[binary_id] = {
                 "id": binary_id,
@@ -204,7 +210,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "platform": pdbinfo["Platform"] if "Platform" in pdbinfo else "gcc",
                 "build_mode": pdbinfo["Build_mode"] if "Build_mode" in pdbinfo else "",
                 "toolset_version": pdbinfo["Toolset_version"] if "Toolset_version" in pdbinfo else "",
-                "pushed_at": pushed_at,
+                "repo_last_update": pushed_at,
                 "optimization": pdbinfo["Optimization"] if "Optimization" in pdbinfo else pdbinfo["flags"],
                 "path": os.path.join(path, filename),
                 "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
