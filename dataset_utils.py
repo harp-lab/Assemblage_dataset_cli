@@ -79,7 +79,7 @@ def process(zip_path, dest, inplace):
     print("Checking all files")
     zipped_files = glob.glob(f"{zip_path}/**/*.zip", recursive=1)
     print(len(zipped_files), 'found')
-    pool = Pool(processes=128)
+    pool = Pool(processes=os.cpu_count()*4)
     for f in zipped_files:
         pool.apply_async(unzip_process, args=(f, dest, inplace, ))
     pool.close()
@@ -94,12 +94,11 @@ def unzip_process(f, dest, inplace):
     except Exception as e:
         print(e)
         return
+    if len(os.listdir(tmp)) == 1:
+        tmp = os.path.join(tmp, os.listdir(tmp)[0])
     if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
-        try:
-            with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
-                pdb_info_dict = json.load(pdbf)
-        except:
-            return
+        with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
+            pdb_info_dict = json.load(pdbf)
         binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)
         for f in glob.glob(tmp+"/**/*", recursive=True):
             if is_elf_bin(f):
@@ -111,16 +110,10 @@ def unzip_process(f, dest, inplace):
         plat = pdb_info_dict["Platform"] if "Platform" in pdb_info_dict else ""
         mode = pdb_info_dict["Build_mode"]
         toolv = pdb_info_dict["Toolset_version"] if "Toolset_version" in pdb_info_dict else "?"
-        if toolv.lower() in ['gcc', 'clang']:
-            plat = "Linux"
         pdb_info_dict["Toolset_version"] = toolv
         opti = pdb_info_dict["Optimization"]
         github_url = pdb_info_dict["URL"]
         for binf in binfiles+pdbfiles:
-            if "x86" in binf:
-                plat = "Windows_x86"
-            elif "x64" in binf:
-                plat = "Windows_x64"
             identifier = f"{get_md5(github_url)}_{plat}_{mode}_{toolv}_{opti}"
             if not os.path.isdir(f"{dest}/{identifier}"):
                 os.makedirs(f"{dest}/{identifier}")
@@ -128,27 +121,41 @@ def unzip_process(f, dest, inplace):
             bin_dest = f"{identifier}_{bin_name}"
             shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
             assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
-        json.dump(pdb_info_dict, f"{dest}/{identifier}/pdbinfo.json")
+        shutil.move(os.path.join(tmp, "pdbinfo.json"), f"{dest}/{identifier}/pdbinfo.json")
+        assert os.path.isfile(f"{dest}/{identifier}/pdbinfo.json")
     runcmd(f"rm -rf {tmp}")
+    return
 
 
 # Actual function to construct the database
 def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
     logging.info("Creating database")
-    init_clean_database(f"sqlite:///{dbfile}")
+    if os.path.isfile(dbfile):
+        connection = sqlite3.connect(dbfile)
+        cursor = connection.cursor()
+        ids = cursor.execute('SELECT id FROM binaries')
+        binary_id = max([x[0] for x in ids]+[1000]) + 1
+        ids = cursor.execute('SELECT id FROM functions')
+        function_id = max([x[0] for x in ids]+[1000]) + 1
+    else:
+        init_clean_database(f"sqlite:///{dbfile}")
+        binary_id = 1000
+        function_id = 1
     db = Dataset_DB(f"sqlite:///{dbfile}")
     logging.info("Sorting files")
-    binary_id = 1000
-    function_id = 1
     binary_ds = {}
     function_ds = []
     line_ds = []
     rva_ds = []
     pdb_ds = []
-    for identifier in tqdm(os.listdir(target_dir)):
+    target_folders = os.listdir(target_dir)
+    for identifier in tqdm(target_folders):
         if len(identifier) == 2:
+            print("Processed, skip")
             continue
         if not os.path.isfile(os.path.join(target_dir, identifier, "pdbinfo.json")):
+            print("Missing meta data, skip", os.path.join(target_dir, identifier, "pdbinfo.json"))
+            print("Found", os.listdir(os.path.join(target_dir, identifier)))
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe")\
@@ -159,6 +166,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             pdbinfo = json.load(
                 open(os.path.join(target_dir, identifier, "pdbinfo.json")))
         except:
+            print("Missing meta data, skip", os.path.join(target_dir, identifier, "pdbinfo.json"))
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         binary_rela = {}
@@ -223,47 +231,50 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             binary_rela[filename] = binary_id
             if "Binary_info_list" in pdbinfo:
                 for binary_file in pdbinfo["Binary_info_list"]:
+                    mapped_memory = ""
                     try:
                         pe_obj = pefile.PE(os.path.join(target_dir, path, filename), fast_load=1)
                         mapped_memory = pe_obj.get_memory_mapped_image()
-
-                        if filename in binary_file["file"]:
-                            bin_id = binary_rela[filename]
-                            for function_info in binary_file["functions"]:
-                                function_name = function_info["function_name"]
-                                source_file = None
-                                rvablocks = [{
-                                                "start": int(x['rva_start'], 16),
-                                                "end": int(x['rva_end'], 16),
-                                                "function_id": function_id,
-                                            } for x in function_info["function_info"]]
-                                for rvablock in rvablocks:
-                                    rva_ds.append(rvablock)
-                                function_ds.append({
-                                    "name": function_name,
-                                    "binary_id": bin_id,
-                                    "id": function_id,
-                                    "hash": get_hash_bin_rva(mapped_memory, [[x["start"], x["end"]] for x in rvablocks])})
-                                binary_ds[bin_id]["source_file"] = source_file
-                                if include_lines:
-                                    for line_info in function_info["lines"]:
-                                        line_number = line_info["line_number"]
-                                        length = line_info["length"]
-                                        source_code = line_info["source_code"]
-                                        if "source_file" in line_info:
-                                            source_file = re.sub(checksum_format, "", line_info["source_file"])
-                                        if source_code:
-                                            line_ds.append({
-                                                "line_number": line_number,
-                                                "source_file": source_file,
-                                                "source_code": source_code,
-                                                "function_id": function_id})
-                                function_id += 1
                     except:
+                        print("Can't retrive PE image, skip")
                         continue
+                    if filename in binary_file["file"]:
+                        bin_id = binary_rela[filename]
+                        for function_info in binary_file["functions"]:
+                            function_name = function_info["function_name"]
+                            source_file = None
+                            rvablocks = [{
+                                            "start": int(x['rva_start'], 16),
+                                            "end": int(x['rva_end'], 16),
+                                            "function_id": function_id,
+                                        } for x in function_info["function_info"]]
+                            for rvablock in rvablocks:
+                                rva_ds.append(rvablock)
+                            function_ds.append({
+                                "name": function_name,
+                                "binary_id": bin_id,
+                                "id": function_id,
+                                "hash": get_hash_bin_rva(mapped_memory, [[x["start"], x["end"]] for x in rvablocks])})
+                            if include_lines:
+                                for line_info in function_info["lines"]:
+                                    line_number = line_info["line_number"]
+                                    length = line_info["length"]
+                                    source_code = line_info["source_code"]
+                                    if "source_file" in line_info:
+                                        source_file = re.sub(checksum_format, "", line_info["source_file"])
+                                    if source_code:
+                                        line_ds.append({
+                                            "line_number": line_number,
+                                            "source_file": source_file,
+                                            "source_code": source_code,
+                                            "function_id": function_id})
+                            function_id += 1
+
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
+        print(len(binary_ds), "binaries in memory")
         if len(binary_ds) > 10000:
+            print("Flush database")
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
                 db.bulk_add_functions(function_ds)
@@ -294,7 +305,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     full_paths = []
     paths = cursor.execute('SELECT path FROM binaries')
     for path in tqdm(paths):
-        full_path = os.path.join(target_dir, path)
+        full_path = os.path.join(target_dir, path[0])
         assert os.path.isfile(full_path)
         full_paths.append(full_path)
     files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True)]
@@ -342,8 +353,10 @@ def get_hash_bin_rva(mapped_memory, rvablocks):
     for rva_block in rvablocks:
         start_rva = rva_block[0]
         end_rva = rva_block[1]
-        shaobj.update(mapped_memory[start_rva:end_rva])
-
+        try:
+            shaobj.update(mapped_memory[start_rva:end_rva])
+        except:
+            return "null"
     return shaobj.hexdigest()
 
 def convert_hex_int(hex_str):
