@@ -24,6 +24,8 @@ from multiprocessing import Pool
 from elftools.elf.elffile import ELFFile
 from elftools.common.exceptions import ELFError
 
+METAFILE = "assemblage_meta.json"
+
 logging.basicConfig(format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
                     datefmt='%H:%M:%S',
                     level=logging.INFO)
@@ -96,8 +98,8 @@ def unzip_process(f, dest, inplace):
         return
     if len(os.listdir(tmp)) == 1:
         tmp = os.path.join(tmp, os.listdir(tmp)[0])
-    if os.path.isfile(os.path.join(tmp, "pdbinfo.json")):
-        with open(os.path.join(tmp, "pdbinfo.json")) as pdbf:
+    if os.path.isfile(os.path.join(tmp, METAFILE)):
+        with open(os.path.join(tmp, METAFILE)) as pdbf:
             pdb_info_dict = json.load(pdbf)
         binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)
         for f in glob.glob(tmp+"/**/*", recursive=True):
@@ -121,9 +123,10 @@ def unzip_process(f, dest, inplace):
             bin_dest = f"{identifier}_{bin_name}"
             shutil.move(binf, f"{dest}/{identifier}/{bin_dest}")
             assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
-        shutil.move(os.path.join(tmp, "pdbinfo.json"), f"{dest}/{identifier}/pdbinfo.json")
-        assert os.path.isfile(f"{dest}/{identifier}/pdbinfo.json")
+        shutil.move(os.path.join(tmp, METAFILE), f"{dest}/{identifier}/{METAFILE}")
+        assert os.path.isfile(f"{dest}/{identifier}/{METAFILE}")
     runcmd(f"rm -rf {tmp}")
+    print("Finished",f, "to", os.listdir(f"{dest}/{identifier}"))
     return
 
 
@@ -153,9 +156,9 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         if len(identifier) == 2:
             print("Processed, skip")
             continue
-        if not os.path.isfile(os.path.join(target_dir, identifier, "pdbinfo.json")):
-            print("Missing meta data, skip", os.path.join(target_dir, identifier, "pdbinfo.json"))
-            print("Found", os.listdir(os.path.join(target_dir, identifier)))
+        if not os.path.isfile(os.path.join(target_dir, identifier, METAFILE)):
+            # print("Missing meta data, skip", os.path.join(target_dir, identifier, METAFILE))
+            print("Missing meta data, ", os.listdir(os.path.join(target_dir, identifier)))
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe")\
@@ -164,9 +167,9 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         pdbs = [x for x in os.listdir(os.path.join(target_dir, identifier)) if x.lower().endswith(".pdb")]
         try:
             pdbinfo = json.load(
-                open(os.path.join(target_dir, identifier, "pdbinfo.json")))
+                open(os.path.join(target_dir, identifier, METAFILE)))
         except:
-            print("Missing meta data, skip", os.path.join(target_dir, identifier, "pdbinfo.json"))
+            print("Missing meta data, skip", os.path.join(target_dir, identifier, METAFILE))
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         binary_rela = {}
@@ -273,7 +276,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
         print(len(binary_ds), "binaries in memory")
-        if len(binary_ds) > 10000:
+        if len(binary_ds) > 50000:
             print("Flush database")
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
