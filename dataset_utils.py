@@ -253,11 +253,19 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                                         } for x in function_info["function_info"]]
                             for rvablock in rvablocks:
                                 rva_ds.append(rvablock)
-                            function_ds.append({
+                            function_obj = {
                                 "name": function_name,
                                 "binary_id": bin_id,
                                 "id": function_id,
-                                "hash": get_hash_bin_rva(mapped_memory, [[x["start"], x["end"]] for x in rvablocks])})
+                                "hash": get_hash_bin_rva(mapped_memory, 
+                                        [[x["start"], x["end"]] for x in rvablocks]),
+                                "definition":"",
+                                "comment":""}
+                            if "definitions" in function_info:
+                                function_obj["definition"] = function_info["definitions"]
+                            if "comments" in function_info:
+                                function_obj["comment"] = function_info["comments"]
+                            function_ds.append(function_obj)
                             if include_lines:
                                 for line_info in function_info["lines"]:
                                     line_number = line_info["line_number"]
@@ -361,37 +369,3 @@ def get_hash_bin_rva(mapped_memory, rvablocks):
         except:
             return "null"
     return shaobj.hexdigest()
-
-def convert_hex_int(hex_str):
-    return int("0x"+str(hex_str), 16) 
-
-def addr_convert(dir):
-    if os.path.isfile(os.path.join(dir, "addr2name.json")):
-        return
-    if os.path.isfile(os.path.join(dir, os.path.join(dir.split("/")[-1])+".json")):
-        db = json.load(open(os.path.join(dir, dir.split("/")[-1])+".json", "r"))
-    else:
-        shutil.rmtree(dir)
-        return
-    name2addr = {}
-    for file_db in db["Binary_info_list"]:
-        filename = file_db["file"]
-        functions = file_db["functions"]
-        filename_base = os.path.basename(filename)
-        for function in functions:
-            function_name = function["function_name"]
-            for function_info in function["function_info"]:
-                rva_start = function_info["rva_start"]
-                rva_end = function_info["rva_end"]
-                for dirfile in os.listdir(dir):
-                    if dirfile.endswith(filename_base):
-                        pe_obj = pefile.PE(os.path.join(dir, dirfile), fast_load=1)
-                        ph_start = pe_obj.get_physical_by_rva(convert_hex_int(rva_start))
-                        if function_name in name2addr:
-                            name2addr[function_name] = min(name2addr[function_name], ph_start)
-                        else:
-                            name2addr[function_name] = convert_hex_int(ph_start)
-    addr2name = {x:y for y,x in name2addr.items()}
-    with open(os.path.join(dir, "addr2name.json"), "w") as f:
-        json.dump(addr2name, f)
-    os.remove(os.path.join(dir, os.path.join(dir.split("/")[-1])+".json"))
