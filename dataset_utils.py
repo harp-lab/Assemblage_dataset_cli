@@ -101,7 +101,7 @@ def unzip_process(f, dest, inplace):
     if os.path.isfile(os.path.join(tmp, METAFILE)):
         with open(os.path.join(tmp, METAFILE)) as pdbf:
             pdb_info_dict = json.load(pdbf)
-        binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)
+        binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)+glob.glob(tmp+"/**/*.EXE", recursive=True)+glob.glob(tmp+"/**/*.DLL", recursive=True)
         for f in glob.glob(tmp+"/**/*", recursive=True):
             if is_elf_bin(f):
                 binfiles.append(f)
@@ -125,7 +125,11 @@ def unzip_process(f, dest, inplace):
             assert os.path.isfile(f"{dest}/{identifier}/{bin_dest}")
         shutil.move(os.path.join(tmp, METAFILE), f"{dest}/{identifier}/{METAFILE}")
         assert os.path.isfile(f"{dest}/{identifier}/{METAFILE}")
+    if len(os.listdir(os.path.join(dest, identifier))) < 2:
+        runcmd(f"rm -rf {dest}/{identifier}")
     runcmd(f"rm -rf {tmp}")
+    if inplace:
+        runcmd(f"rm -rf {f}")
     print("Finished",f, "to", os.listdir(f"{dest}/{identifier}"))
     return
 
@@ -264,7 +268,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                             if "definitions" in function_info:
                                 function_obj["definition"] = function_info["definitions"]
                             if "comments" in function_info:
-                                function_obj["comment"] = function_info["comments"]
+                                function_obj["comment"] = "\n".join(function_info["comments"])
                             function_ds.append(function_obj)
                             if include_lines:
                                 for line_info in function_info["lines"]:
@@ -284,7 +288,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
         print(len(binary_ds), "binaries in memory")
-        if len(binary_ds) > 50000:
+        if len(binary_ds) > 2500:
             print("Flush database")
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:
@@ -313,12 +317,12 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     print("Checking files")
     connection = sqlite3.connect(dbfile)
     cursor = connection.cursor()
-    full_paths = []
+    full_paths = {}
     paths = cursor.execute('SELECT path FROM binaries')
     for path in tqdm(paths):
         full_path = os.path.join(target_dir, path[0])
         assert os.path.isfile(full_path)
-        full_paths.append(full_path)
+        full_paths[full_path] = 1
     files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True)]
     for x in tqdm(files):
         if os.path.isfile(x) and x not in full_paths:

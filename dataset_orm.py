@@ -48,7 +48,7 @@ class Function(Base):
     hash = Column(String(length=16))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
     comment = Column(Text)
-    defination = Column(Text)
+    definition = Column(Text)
 
 class RVA(Base):
     __tablename__ = 'rvas'
