@@ -18,12 +18,13 @@ import os
 @click.option('--rvas', is_flag=True, help='Store RVA information in the database')
 @click.option('--pdbs', is_flag=True, help='Store PDB file, takes up additional space')
 @click.option('--inplace', is_flag=True, help='Delete zip file while processing')
+@click.option('--nopdb', is_flag=True, help='Delete pdb file while processing')
 # Todo: merge legacy operations to one command
 @click.option('--addlicense', is_flag=True, help='Update license information in database')
 
 
 
-def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas, pdbs, inplace, addlicense):
+def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, functions, rvas, pdbs, inplace, addlicense, nopdb):
     """Assemblage Dataset Interface"""
     if g:
         assert data
@@ -33,7 +34,7 @@ def main(data, s3, dest, g, dbfile, f, uppersize, lowersize, amount, lines, func
         assert dbfile
         update_license(dbfile)
     elif data:
-        process(data, dest, inplace)
+        process(data, dest, inplace, nopdb)
 
 
 if __name__ == '__main__':

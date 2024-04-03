@@ -8,3 +8,5 @@ vcpkg
 *.sqlite
 *.json
 _*
+win*
+sample*

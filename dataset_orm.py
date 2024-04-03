@@ -40,6 +40,7 @@ class Binary(Base):
     path = Column(String(length=128))
     license = Column(String(length=128), default='')
     hash = Column(String(length=16))
+    repo_commit_hash = Column(String(length=16))
 
 class Function(Base):
     __tablename__ = 'functions'
@@ -47,8 +48,12 @@ class Function(Base):
     name = Column(String(length=128))
     hash = Column(String(length=16))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
-    comment = Column(Text)
-    definition = Column(Text)
+    top_comments = Column(Text)
+    # body_comments = Column(Text)
+    source_codes = Column(Text)
+    # source_codes_ctags = Column(Text)
+    prototype = Column(Text)
+    source_file = Column(Text)
 
 class RVA(Base):
     __tablename__ = 'rvas'
@@ -63,6 +68,8 @@ class Line(Base):
     line_number = Column(Integer)
     source_file = Column(String(length=64))
     source_code = Column(Text)
+    rva = Column(String(length=8))
+    length = Column(Integer)
     function_id = Column(Integer, ForeignKey('functions.id'),)
 
 class PDB(Base):

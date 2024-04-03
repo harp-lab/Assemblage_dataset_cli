@@ -77,21 +77,21 @@ def runcmd(cmd):
     return stdout, stderr, process.returncode
 
 
-def process(zip_path, dest, inplace):
+def process(zip_path, dest, inplace, nopdb):
     print("Checking all files")
     zipped_files = glob.glob(f"{zip_path}/**/*.zip", recursive=1)
     print(len(zipped_files), 'found')
-    pool = Pool(processes=os.cpu_count()*4)
+    pool = Pool(128)
     for f in zipped_files:
-        pool.apply_async(unzip_process, args=(f, dest, inplace, ))
+        pool.apply_async(unzip_process, args=(f, dest, inplace, nopdb,))
     pool.close()
     pool.join()
 
-def unzip_process(f, dest, inplace):
+def unzip_process(zipfile_path, dest, inplace, nopdb):
     """Unzip the file and check if it is a valid zip file"""
     tmp = f"{dest}/{os.urandom(32).hex()}"
     try:
-        with zipfile.ZipFile(f, 'r') as zip_ref:
+        with zipfile.ZipFile(zipfile_path, 'r') as zip_ref:
             zip_ref.extractall(tmp)
     except Exception as e:
         print(e)
@@ -106,6 +106,8 @@ def unzip_process(f, dest, inplace):
             if is_elf_bin(f):
                 binfiles.append(f)
         pdbfiles = glob.glob(tmp+"/**/*.pdb", recursive=True)
+        if nopdb:
+            pdbfiles = []
         if len(binfiles)==0:
             shutil.rmtree(tmp)
             return
@@ -128,9 +130,7 @@ def unzip_process(f, dest, inplace):
     if len(os.listdir(os.path.join(dest, identifier))) < 2:
         runcmd(f"rm -rf {dest}/{identifier}")
     runcmd(f"rm -rf {tmp}")
-    if inplace:
-        runcmd(f"rm -rf {f}")
-    print("Finished",f, "to", os.listdir(f"{dest}/{identifier}"))
+    print("Inflated", zipfile_path, " -> ", os.listdir(f"{dest}/{identifier}"))
     return
 
 
@@ -162,7 +162,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             continue
         if not os.path.isfile(os.path.join(target_dir, identifier, METAFILE)):
             # print("Missing meta data, skip", os.path.join(target_dir, identifier, METAFILE))
-            print("Missing meta data, ", os.listdir(os.path.join(target_dir, identifier)))
+            # print("Missing meta data, ", os.listdir(os.path.join(target_dir, identifier)))
             runcmd(f"rm -r {target_dir}/{identifier}")
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe")\
@@ -226,6 +226,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "build_mode": pdbinfo["Build_mode"] if "Build_mode" in pdbinfo else "",
                 "toolset_version": pdbinfo["Toolset_version"] if "Toolset_version" in pdbinfo else "",
                 "repo_last_update": pushed_at,
+                "repo_commit_hash": pdbinfo["Commit"],
                 "optimization": pdbinfo["Optimization"] if "Optimization" in pdbinfo else pdbinfo["flags"],
                 "path": os.path.join(path, filename),
                 "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
@@ -249,7 +250,6 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                         bin_id = binary_rela[filename]
                         for function_info in binary_file["functions"]:
                             function_name = function_info["function_name"]
-                            source_file = None
                             rvablocks = [{
                                             "start": int(x['rva_start'], 16),
                                             "end": int(x['rva_end'], 16),
@@ -263,31 +263,48 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                                 "id": function_id,
                                 "hash": get_hash_bin_rva(mapped_memory, 
                                         [[x["start"], x["end"]] for x in rvablocks]),
-                                "definition":"",
-                                "comment":""}
-                            if "definitions" in function_info:
-                                function_obj["definition"] = function_info["definitions"]
-                            if "comments" in function_info:
-                                function_obj["comment"] = "\n".join(function_info["comments"])
+                                # "body_comments":"",
+                                "top_comments":"",
+                                "source_codes":"",
+                                # "source_codes_ctags":"",
+                                "prototype":"",
+                                "source_file":""}
+                            if "source_codes" in function_info:
+                                function_obj["source_codes"] = function_info["source_codes"]
+                            # if "source_codes" in function_info:
+                            #     function_obj["source_codes"] = function_info["source_codes"]
+                            # if "source_codes_ctags" in function_info:
+                            #     function_obj["source_codes_ctags"] = function_info["source_codes_ctags"]
+                            if "top_comments" in function_info:
+                                function_obj["top_comments"] = (function_info["top_comments"])
+                            # if "body_comments" in function_info:
+                            #     function_obj["body_comments"] = (function_info["body_comments"])
+                            if "prototype" in function_info:
+                                function_obj["prototype"] = function_info["prototype"]
+                            if "source_file" in function_info:
+                                function_obj["source_file"] = function_info["source_file"]
                             function_ds.append(function_obj)
                             if include_lines:
                                 for line_info in function_info["lines"]:
                                     line_number = line_info["line_number"]
                                     length = line_info["length"]
                                     source_code = line_info["source_code"]
+                                    rva = line_info["rva"]
                                     if "source_file" in line_info:
-                                        source_file = re.sub(checksum_format, "", line_info["source_file"])
+                                        source_file = line_info["source_file"]
                                     if source_code:
                                         line_ds.append({
                                             "line_number": line_number,
                                             "source_file": source_file,
                                             "source_code": source_code,
-                                            "function_id": function_id})
+                                            "function_id": function_id,
+                                            "rva": "0x"+rva,
+                                            "length": length})
                             function_id += 1
 
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
-        print(len(binary_ds), "binaries in memory")
+        # print(len(binary_ds), "binaries in memory")
         if len(binary_ds) > 2500:
             print("Flush database")
             db.bulk_add_binaries(binary_ds.values())
