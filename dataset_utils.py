@@ -222,7 +222,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "id": binary_id,
                 "github_url": pdbinfo["URL"] if "URL" in pdbinfo else pdbinfo["url"],
                 "file_name": filename,
-                "platform": pdbinfo["Platform"] if "Platform" in pdbinfo else "gcc",
+                "platform": pdbinfo["Platform"] if "Platform" in pdbinfo else "",
                 "build_mode": pdbinfo["Build_mode"] if "Build_mode" in pdbinfo else "",
                 "toolset_version": pdbinfo["Toolset_version"] if "Toolset_version" in pdbinfo else "",
                 "repo_last_update": pushed_at,
@@ -342,7 +342,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         full_paths[full_path] = 1
     files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True)]
     for x in tqdm(files):
-        if os.path.isfile(x) and x not in full_paths:
+        if os.path.isfile(x) and (not x.lower().endswith("pdb")) and x not in full_paths:
             os.remove(x)
     print(f"Finished database location: {dbfile}, binary location: {target_dir}")
 
