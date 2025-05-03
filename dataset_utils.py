@@ -16,7 +16,6 @@ import pefile
 import logging
 import sqlite3
 import json
-import pefile
 
 from db import Dataset_DB
 from dataset_orm import *
@@ -137,17 +136,18 @@ def unzip_process(zipfile_path, dest, inplace, nopdb):
 # Actual function to construct the database
 def db_construct(dbfile, target_dir, include_lines, include_functions, include_rvas, include_pdbs):
     logging.info("Creating database")
+    binary_id = 1000
+    function_id = 1
     if os.path.isfile(dbfile):
-        connection = sqlite3.connect(dbfile)
-        cursor = connection.cursor()
-        ids = cursor.execute('SELECT id FROM binaries')
-        binary_id = max([x[0] for x in ids]+[1000]) + 1
-        ids = cursor.execute('SELECT id FROM functions')
-        function_id = max([x[0] for x in ids]+[1000]) + 1
+        try:
+            connection = sqlite3.connect(dbfile)
+            cursor = connection.cursor()
+            binary_id = cursor.execute('SELECT max(id) FROM binaries').fetchone()[0]+1
+            function_id = cursor.execute('SELECT max(id) FROM functions').fetchone()[0]+1
+        except:
+            init_clean_database(f"sqlite:///{dbfile}")
     else:
         init_clean_database(f"sqlite:///{dbfile}")
-        binary_id = 1000
-        function_id = 1
     db = Dataset_DB(f"sqlite:///{dbfile}")
     logging.info("Sorting files")
     binary_ds = {}
@@ -158,34 +158,32 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     target_folders = os.listdir(target_dir)
     for identifier in tqdm(target_folders):
         if len(identifier) == 2:
-            print("Processed, skip")
             continue
         if not os.path.isfile(os.path.join(target_dir, identifier, METAFILE)):
-            # print("Missing meta data, skip", os.path.join(target_dir, identifier, METAFILE))
-            # print("Missing meta data, ", os.listdir(os.path.join(target_dir, identifier)))
-            runcmd(f"rm -r {target_dir}/{identifier}")
+            runcmd(f"rm -rf {target_dir}/{identifier}")
             continue
         bins = [x for x in os.listdir(os.path.join(target_dir, identifier)) if (x.lower().endswith(".exe")\
                                                                          or x.lower().endswith(".dll")\
                                                                          or is_elf_bin(os.path.join(target_dir, identifier, x)))]
         pdbs = [x for x in os.listdir(os.path.join(target_dir, identifier)) if x.lower().endswith(".pdb")]
         try:
-            pdbinfo = json.load(
-                open(os.path.join(target_dir, identifier, METAFILE)))
+            pdbinfo = json.load(open(os.path.join(target_dir, identifier, METAFILE)))
         except:
-            print("Missing meta data, skip", os.path.join(target_dir, identifier, METAFILE))
-            runcmd(f"rm -r {target_dir}/{identifier}")
+            print("Missing meta data, skip", os.path.join(target_dir, identifier))
+            runcmd(f"rm -rf {target_dir}/{identifier}")
             continue
         binary_rela = {}
         pdb_paths_moved = []
+        license = pdbinfo["License"] if "License" in pdbinfo else ""
         if include_pdbs:
             for pdbfile in pdbs:
+                uid4pdb = os.urandom(4).hex()+"_"
                 pdb_folder = assign_path(str(binary_id))
                 if not os.path.isdir(os.path.join(target_dir, pdb_folder)):
                     os.makedirs(os.path.join(target_dir, pdb_folder))
                 shutil.move(os.path.join(target_dir, identifier, pdbfile),
-                    os.path.join(target_dir, pdb_folder, pdbfile))
-                pdb_paths_moved.append(os.path.join(pdb_folder, pdbfile))
+                    os.path.join(target_dir, pdb_folder, uid4pdb+pdbfile))
+                pdb_paths_moved.append(os.path.join(pdb_folder, uid4pdb+pdbfile))
         for binfile in bins:
             binary_id += 1
             filename = binfile.replace(identifier+"_", "")
@@ -226,16 +224,25 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "build_mode": pdbinfo["Build_mode"] if "Build_mode" in pdbinfo else "",
                 "toolset_version": pdbinfo["Toolset_version"] if "Toolset_version" in pdbinfo else "",
                 "repo_last_update": pushed_at,
-                "repo_commit_hash": pdbinfo["Commit"],
+                "repo_commit_hash": pdbinfo["Commit"] if "Commit" in pdbinfo else "",
                 "optimization": pdbinfo["Optimization"] if "Optimization" in pdbinfo else pdbinfo["flags"],
                 "path": os.path.join(path, filename),
                 "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
-                "hash": sha256sum(os.path.join(target_dir, path, filename))
+                "hash": sha256sum(os.path.join(target_dir, path, filename)),
+                "license": license,
             }
             pdb_ds.extend([{
                 "binary_id": binary_id,
                 "pdb_path": x} 
                     for x in pdb_paths_moved])
+            seen = set()
+            deduped_pdb_ds = []
+            for item in pdb_ds:
+                key = (item["binary_id"], item["pdb_path"])
+                if key not in seen:
+                    seen.add(key)
+                    deduped_pdb_ds.append(item)
+            pdb_ds = deduped_pdb_ds
             binary_rela[filename] = binary_id
             if "Binary_info_list" in pdbinfo:
                 for binary_file in pdbinfo["Binary_info_list"]:
@@ -271,8 +278,6 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                                 "source_file":""}
                             if "source_codes" in function_info:
                                 function_obj["source_codes"] = function_info["source_codes"]
-                            # if "source_codes" in function_info:
-                            #     function_obj["source_codes"] = function_info["source_codes"]
                             # if "source_codes_ctags" in function_info:
                             #     function_obj["source_codes_ctags"] = function_info["source_codes_ctags"]
                             if "top_comments" in function_info:
@@ -305,7 +310,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
         # print(len(binary_ds), "binaries in memory")
-        if len(binary_ds) > 2500:
+        if len(binary_ds) > 1000:
             print("Flush database")
             db.bulk_add_binaries(binary_ds.values())
             if include_functions:

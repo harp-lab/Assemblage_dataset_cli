@@ -139,6 +139,12 @@ class Dataset_DB:
             session.execute(q)
             session.commit()
 
+    def update_version(self, url, version):
+        with Session(self.engine) as session:
+            q = update(Binary).where(Binary.github_url == url).values(repo_commit_hash=version)
+            session.execute(q)
+            session.commit()
+
     def get_all_urls(self):
         with Session(self.engine) as session:
             query = select(Binary.github_url).where(Binary.license=="").distinct()
