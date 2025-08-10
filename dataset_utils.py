@@ -76,7 +76,7 @@ def runcmd(cmd):
     return stdout, stderr, process.returncode
 
 
-def process(zip_path, dest, inplace, nopdb):
+def process(zip_path, dest, inplace, nopdb=False):
     print("Checking all files")
     zipped_files = glob.glob(f"{zip_path}/**/*.zip", recursive=1)
     print(len(zipped_files), 'found')
@@ -100,13 +100,18 @@ def unzip_process(zipfile_path, dest, inplace, nopdb):
     if os.path.isfile(os.path.join(tmp, METAFILE)):
         with open(os.path.join(tmp, METAFILE)) as pdbf:
             pdb_info_dict = json.load(pdbf)
-        binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)+glob.glob(tmp+"/**/*.dll", recursive=True)+glob.glob(tmp+"/**/*.EXE", recursive=True)+glob.glob(tmp+"/**/*.DLL", recursive=True)
+        binfiles = glob.glob(tmp+"/**/*.exe", recursive=True)\
+            +glob.glob(tmp+"/**/*.dll", recursive=True)\
+            +glob.glob(tmp+"/**/*.EXE", recursive=True)\
+            +glob.glob(tmp+"/**/*.DLL", recursive=True)\
+            +glob.glob(tmp+"/**/*.lib", recursive=True)\
+            +glob.glob(tmp+"/**/*.LIB", recursive=True)
+
         for f in glob.glob(tmp+"/**/*", recursive=True):
             if is_elf_bin(f):
                 binfiles.append(f)
-        pdbfiles = glob.glob(tmp+"/**/*.pdb", recursive=True)
-        if nopdb:
-            pdbfiles = []
+
+        pdbfiles = glob.glob(tmp+"/**/*.pdb", recursive=True) + glob.glob(tmp+"/**/*.PDB", recursive=True)
         if len(binfiles)==0:
             shutil.rmtree(tmp)
             return
@@ -139,17 +144,17 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
     binary_id = 1000
     function_id = 1
     if os.path.isfile(dbfile):
-        try:
-            connection = sqlite3.connect(dbfile)
-            cursor = connection.cursor()
-            binary_id = cursor.execute('SELECT max(id) FROM binaries').fetchone()[0]+1
-            function_id = cursor.execute('SELECT max(id) FROM functions').fetchone()[0]+1
-        except:
-            init_clean_database(f"sqlite:///{dbfile}")
+        connection = sqlite3.connect(dbfile)
+        cursor = connection.cursor()
+        binary_id = cursor.execute('SELECT max(id) FROM binaries').fetchone()[0]+1
+        function_id = cursor.execute('SELECT max(id) FROM functions').fetchone()[0]+1
     else:
         init_clean_database(f"sqlite:///{dbfile}")
+        print("Database created")
+    print("binary_id", binary_id)
+    print("function_id", function_id)
+
     db = Dataset_DB(f"sqlite:///{dbfile}")
-    logging.info("Sorting files")
     binary_ds = {}
     function_ds = []
     line_ds = []
