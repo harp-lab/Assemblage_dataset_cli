@@ -29,24 +29,25 @@ class Binary(Base):
     __tablename__ = 'binaries'
 
     id = Column(Integer, primary_key=True, autoincrement=True,)
-    file_name = Column(String(length=32))
-    platform = Column(String(length=8))
-    build_mode = Column(String(length=8))
-    toolset_version = Column(String(length=4))
-    github_url = Column(String(length=128))
-    optimization = Column(String(length=4))
+    file_name = Column(String(length=256))
+    platform = Column(String(length=16))
+    build_mode = Column(String(length=32))
+    toolset_version = Column(String(length=32))
+    github_url = Column(String(length=256))
+    optimization = Column(String(length=8))
     repo_last_update = Column(Integer)
     size = Column(Integer, default=0)
-    path = Column(String(length=128))
+    path = Column(String(length=256))
     license = Column(String(length=128), default='')
-    hash = Column(String(length=16))
-    repo_commit_hash = Column(String(length=16))
+    hash = Column(String(length=64))
+    repo_commit_hash = Column(String(length=64))
+    binary_format = Column(String(length=8), default='')  # "PE" or "ELF"
 
 class Function(Base):
     __tablename__ = 'functions'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(length=128))
-    hash = Column(String(length=16))
+    name = Column(String(length=512))
+    hash = Column(String(length=64))
     binary_id = Column(Integer, ForeignKey('binaries.id'))
     top_comments = Column(Text)
     # body_comments = Column(Text)
@@ -66,9 +67,9 @@ class Line(Base):
     __tablename__ = 'lines'
     id = Column(Integer, primary_key=True, autoincrement=True)
     line_number = Column(Integer)
-    source_file = Column(String(length=64))
+    source_file = Column(String(length=512))
     source_code = Column(Text)
-    rva = Column(String(length=8))
+    rva = Column(String(length=20))
     length = Column(Integer)
     function_id = Column(Integer, ForeignKey('functions.id'),)
 

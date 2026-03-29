@@ -230,7 +230,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "toolset_version": pdbinfo["Toolset_version"] if "Toolset_version" in pdbinfo else "",
                 "repo_last_update": pushed_at,
                 "repo_commit_hash": pdbinfo["Commit"] if "Commit" in pdbinfo else "",
-                "optimization": pdbinfo["Optimization"] if "Optimization" in pdbinfo else pdbinfo["flags"],
+                "optimization": pdbinfo.get("Optimization", pdbinfo.get("compiler_flag", pdbinfo.get("flags", ""))),
                 "path": os.path.join(path, filename),
                 "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
                 "hash": sha256sum(os.path.join(target_dir, path, filename)),
@@ -249,68 +249,73 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                     deduped_pdb_ds.append(item)
             pdb_ds = deduped_pdb_ds
             binary_rela[filename] = binary_id
+            # Detect binary format and get memory-mapped image
+            bin_full_path = os.path.join(target_dir, path, filename)
+            binary_fmt = ""
+            mapped_memory = None
+            if is_elf_bin(bin_full_path):
+                binary_fmt = "ELF"
+                mapped_memory = get_elf_mapped_memory(bin_full_path)
+            else:
+                try:
+                    pe_obj = pefile.PE(bin_full_path, fast_load=1)
+                    mapped_memory = pe_obj.get_memory_mapped_image()
+                    binary_fmt = "PE"
+                except Exception:
+                    pass
+            binary_ds[binary_id]["binary_format"] = binary_fmt
             if "Binary_info_list" in pdbinfo:
                 for binary_file in pdbinfo["Binary_info_list"]:
-                    mapped_memory = ""
-                    try:
-                        pe_obj = pefile.PE(os.path.join(target_dir, path, filename), fast_load=1)
-                        mapped_memory = pe_obj.get_memory_mapped_image()
-                    except:
-                        print("Can't retrive PE image, skip")
+                    if mapped_memory is None:
+                        print(f"Can't map {binary_fmt or 'unknown'} image for {filename}, skip")
                         continue
-                    if filename in binary_file["file"]:
-                        bin_id = binary_rela[filename]
-                        for function_info in binary_file["functions"]:
-                            function_name = function_info["function_name"]
-                            rvablocks = [{
-                                            "start": int(x['rva_start'], 16),
-                                            "end": int(x['rva_end'], 16),
-                                            "function_id": function_id,
-                                        } for x in function_info["function_info"]]
-                            for rvablock in rvablocks:
-                                rva_ds.append(rvablock)
-                            function_obj = {
-                                "name": function_name,
-                                "binary_id": bin_id,
-                                "id": function_id,
-                                "hash": get_hash_bin_rva(mapped_memory, 
-                                        [[x["start"], x["end"]] for x in rvablocks]),
-                                # "body_comments":"",
-                                "top_comments":"",
-                                "source_codes":"",
-                                # "source_codes_ctags":"",
-                                "prototype":"",
-                                "source_file":""}
-                            if "source_codes" in function_info:
-                                function_obj["source_codes"] = function_info["source_codes"]
-                            # if "source_codes_ctags" in function_info:
-                            #     function_obj["source_codes_ctags"] = function_info["source_codes_ctags"]
-                            if "top_comments" in function_info:
-                                function_obj["top_comments"] = (function_info["top_comments"])
-                            # if "body_comments" in function_info:
-                            #     function_obj["body_comments"] = (function_info["body_comments"])
-                            if "prototype" in function_info:
-                                function_obj["prototype"] = function_info["prototype"]
-                            if "source_file" in function_info:
-                                function_obj["source_file"] = function_info["source_file"]
-                            function_ds.append(function_obj)
-                            if include_lines:
-                                for line_info in function_info["lines"]:
-                                    line_number = line_info["line_number"]
-                                    length = line_info["length"]
-                                    source_code = line_info["source_code"]
-                                    rva = line_info["rva"]
-                                    if "source_file" in line_info:
-                                        source_file = line_info["source_file"]
-                                    if source_code:
-                                        line_ds.append({
-                                            "line_number": line_number,
-                                            "source_file": source_file,
-                                            "source_code": source_code,
-                                            "function_id": function_id,
-                                            "rva": "0x"+rva,
-                                            "length": length})
-                            function_id += 1
+                    if binary_file["file"] != filename:
+                        continue
+                    bin_id = binary_rela[filename]
+                    for function_info in binary_file["functions"]:
+                        function_name = function_info["function_name"]
+                        rvablocks = [{
+                                        "start": int(x['rva_start'], 16),
+                                        "end": int(x['rva_end'], 16),
+                                        "function_id": function_id,
+                                    } for x in function_info["function_info"]]
+                        for rvablock in rvablocks:
+                            rva_ds.append(rvablock)
+                        function_obj = {
+                            "name": function_name,
+                            "binary_id": bin_id,
+                            "id": function_id,
+                            "hash": get_hash_bin_rva(mapped_memory,
+                                    [[x["start"], x["end"]] for x in rvablocks]),
+                            "top_comments":"",
+                            "source_codes":"",
+                            "prototype":"",
+                            "source_file":""}
+                        if "source_codes" in function_info:
+                            function_obj["source_codes"] = function_info["source_codes"]
+                        if "top_comments" in function_info:
+                            function_obj["top_comments"] = (function_info["top_comments"])
+                        if "prototype" in function_info:
+                            function_obj["prototype"] = function_info["prototype"]
+                        if "source_file" in function_info:
+                            function_obj["source_file"] = function_info["source_file"]
+                        function_ds.append(function_obj)
+                        if include_lines:
+                            for line_info in function_info["lines"]:
+                                line_number = line_info["line_number"]
+                                length = line_info.get("length", 0)
+                                source_code = line_info.get("source_code", "")
+                                rva = line_info.get("rva", "")
+                                source_file = line_info.get("source_file", "")
+                                if line_number:
+                                    line_ds.append({
+                                        "line_number": line_number,
+                                        "source_file": source_file,
+                                        "source_code": source_code,
+                                        "function_id": function_id,
+                                        "rva": ("0x" + rva) if rva else "",
+                                        "length": length})
+                        function_id += 1
 
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
@@ -388,15 +393,37 @@ def update_license(dbfile):
         db.update_license(url, license)
     db.shutdown()
 
+def get_elf_mapped_memory(filepath):
+    """Build a flat byte array from ELF PT_LOAD segments for RVA-based lookups."""
+    try:
+        with open(filepath, 'rb') as f:
+            elf = ELFFile(f)
+            load_segs = [s for s in elf.iter_segments() if s['p_type'] == 'PT_LOAD']
+            if not load_segs:
+                return None
+            base = min(s['p_vaddr'] for s in load_segs)
+            max_addr = max(s['p_vaddr'] + s['p_memsz'] for s in load_segs)
+            mem = bytearray(max_addr - base)
+            for seg in load_segs:
+                off = seg['p_vaddr'] - base
+                data = seg.data()
+                mem[off:off + len(data)] = data
+        return bytes(mem)
+    except Exception:
+        return None
+
+
 def get_hash_bin_rva(mapped_memory, rvablocks):
-    func_bytes = []
     shaobj = hashlib.sha256()
-    rvablocks.sort(key=lambda x:x[0])
+    mem_len = len(mapped_memory)
+    rvablocks.sort(key=lambda x: x[0])
     for rva_block in rvablocks:
         start_rva = rva_block[0]
         end_rva = rva_block[1]
+        if start_rva < 0 or end_rva > mem_len or start_rva >= end_rva:
+            return "null"
         try:
             shaobj.update(mapped_memory[start_rva:end_rva])
-        except:
+        except Exception:
             return "null"
     return shaobj.hexdigest()
