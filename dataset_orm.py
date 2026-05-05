@@ -20,7 +20,11 @@ from sqlite3 import Connection as SQLite3Connection
 def _set_sqlite_pragma(dbapi_connection, connection_record):
     if isinstance(dbapi_connection, SQLite3Connection):
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=OFF;")
+        cursor.execute("PRAGMA cache_size=-64000;")  # 64MB cache
+        cursor.execute("PRAGMA temp_store=MEMORY;")
+        cursor.execute("PRAGMA foreign_keys=OFF;")
         cursor.close()
 
 Base = declarative_base()
@@ -40,7 +44,7 @@ class Binary(Base):
     path = Column(String(length=256))
     license = Column(String(length=128), default='')
     hash = Column(String(length=64))
-    repo_commit_hash = Column(String(length=64))
+    repo_commit = Column(String(length=64))
     binary_format = Column(String(length=8), default='')  # "PE" or "ELF"
 
 class Function(Base):

@@ -148,6 +148,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
         cursor = connection.cursor()
         binary_id = cursor.execute('SELECT max(id) FROM binaries').fetchone()[0]+1
         function_id = cursor.execute('SELECT max(id) FROM functions').fetchone()[0]+1
+        connection.close()
     else:
         init_clean_database(f"sqlite:///{dbfile}")
         print("Database created")
@@ -196,7 +197,7 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
             if not os.path.isdir(os.path.join(target_dir, path)):
                 if os.path.isfile(os.path.join(target_dir, path)):
                     os.remove(os.path.join(target_dir, path))
-                    db.delete_binary("?", path)
+                    # db.delete_binary("?", path)
                 os.makedirs(os.path.join(target_dir, path))
             old_id = binary_id
             for binary_id in range(old_id, old_id+10000):
@@ -229,8 +230,17 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                 "build_mode": pdbinfo["Build_mode"] if "Build_mode" in pdbinfo else "",
                 "toolset_version": pdbinfo["Toolset_version"] if "Toolset_version" in pdbinfo else "",
                 "repo_last_update": pushed_at,
-                "repo_commit_hash": pdbinfo["Commit"] if "Commit" in pdbinfo else "",
-                "optimization": pdbinfo.get("Optimization", pdbinfo.get("compiler_flag", pdbinfo.get("flags", ""))),
+                "repo_commit": pdbinfo.get("Commit", ""),
+                # Order matters: minio_pipeline writes "Compiler_flag" (capital
+                # C); legacy builds wrote "Optimization"; some old paths use
+                # lowercase variants.
+                "optimization": pdbinfo.get(
+                    "Compiler_flag",
+                    pdbinfo.get(
+                        "Optimization",
+                        pdbinfo.get(
+                            "compiler_flag",
+                            pdbinfo.get("flags", "")))),
                 "path": os.path.join(path, filename),
                 "size": os.path.getsize(os.path.join(target_dir, path, filename))//1024,
                 "hash": sha256sum(os.path.join(target_dir, path, filename)),
@@ -274,11 +284,21 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                     bin_id = binary_rela[filename]
                     for function_info in binary_file["functions"]:
                         function_name = function_info["function_name"]
+                        # Skip section pseudo-symbols (e.g. ".text") and
+                        # empty names. These are ELF sections that the
+                        # legacy extractor inadvertently picked up.
+                        if not function_name or function_name.startswith("."):
+                            continue
                         rvablocks = [{
                                         "start": int(x['rva_start'], 16),
                                         "end": int(x['rva_end'], 16),
                                         "function_id": function_id,
                                     } for x in function_info["function_info"]]
+                        # Skip degenerate ranges (start >= end), e.g. zero-size
+                        # alias symbols or section markers that survived above.
+                        rvablocks = [r for r in rvablocks if r["start"] < r["end"]]
+                        if not rvablocks:
+                            continue
                         for rvablock in rvablocks:
                             rva_ds.append(rvablock)
                         function_obj = {
@@ -319,46 +339,21 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
 
         runcmd(f"rm -rf {target_dir}/{identifier}")
         # Flush database
-        # print(len(binary_ds), "binaries in memory")
-        if len(binary_ds) > 1000:
-            print("Flush database")
-            db.bulk_add_binaries(binary_ds.values())
-            if include_functions:
-                db.bulk_add_functions(function_ds)
-            if include_lines:
-                db.bulk_add_lines(line_ds)
-            if include_rvas:
-                db.bulk_add_rvas(rva_ds)
-            if include_pdbs:
-                db.bulk_add_pdbs(pdb_ds)
+        # print(len(binary_ds), "binaries in `memory")
+        if len(binary_ds) > 25:
+            print(f"Flush database: {len(binary_ds)} bins, {len(function_ds)} funcs, {len(line_ds)} lines")
+            db.bulk_flush(binary_ds.values(), function_ds, line_ds, rva_ds, pdb_ds,
+                          include_functions, include_lines, include_rvas, include_pdbs)
             binary_ds = {}
             function_ds = []
             line_ds = []
             rva_ds = []
-    db.bulk_add_binaries(binary_ds.values())
-    if include_functions:
-        db.bulk_add_functions(function_ds)
-    if include_lines:
-        db.bulk_add_lines(line_ds)
-    if include_rvas:
-        db.bulk_add_rvas(rva_ds)
-    if include_pdbs:
-        db.bulk_add_pdbs(pdb_ds)
+            pdb_ds = []
+    print(f"Final flush: {len(binary_ds)} bins, {len(function_ds)} funcs, {len(line_ds)} lines")
+    db.bulk_flush(binary_ds.values(), function_ds, line_ds, rva_ds, pdb_ds,
+                  include_functions, include_lines, include_rvas, include_pdbs)
     db.shutdown()
 
-    print("Checking files")
-    connection = sqlite3.connect(dbfile)
-    cursor = connection.cursor()
-    full_paths = {}
-    paths = cursor.execute('SELECT path FROM binaries')
-    for path in tqdm(paths):
-        full_path = os.path.join(target_dir, path[0])
-        assert os.path.isfile(full_path)
-        full_paths[full_path] = 1
-    files = [x for x in glob.glob(f'{target_dir}/**/*', recursive=True)]
-    for x in tqdm(files):
-        if os.path.isfile(x) and (not x.lower().endswith("pdb")) and x not in full_paths:
-            os.remove(x)
     print(f"Finished database location: {dbfile}, binary location: {target_dir}")
 
 

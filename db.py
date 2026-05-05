@@ -4,7 +4,7 @@ import time
 import logging
 
 import sqlalchemy.exc
-from sqlalchemy import select, update, create_engine, func, or_, delete
+from sqlalchemy import select, update, create_engine, func, or_, delete, insert
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.expression import desc, true
 from sqlalchemy.ext.compiler import compiles
@@ -18,6 +18,8 @@ from sqlalchemy_utils import create_database, database_exists
 from sqlalchemy.engine import Engine
 from sqlalchemy import event
 from dataset_orm import Binary, Function, Line, Base, init_clean_database, RVA, PDB
+
+BULK_CHUNK_SIZE = 5000
 
 class Dataset_DB:
     """ manager for db query and connection """
@@ -55,13 +57,12 @@ class Dataset_DB:
 
     def bulk_add_binaries(self, binaries):
         """ used to import lot of repos at a time """
-        if not binaries:
-            return []
-        binaries_objs = [Binary(**msg) for msg in binaries]
-        with Session(self.engine) as session:
-            session.bulk_save_objects(binaries_objs, return_defaults=True)
-            session.commit()
-        return binaries_objs
+        rows = list(binaries)
+        if not rows:
+            return
+        with self.engine.begin() as conn:
+            for i in range(0, len(rows), BULK_CHUNK_SIZE):
+                conn.execute(insert(Binary), rows[i:i + BULK_CHUNK_SIZE])
 
     def add_function(self, name, source_file, rvas, binary_id):
         with Session(self.engine) as session:
@@ -76,32 +77,26 @@ class Dataset_DB:
     def bulk_add_functions(self, functions):
         """ used to import lot of repos at a time """
         if not functions:
-            return []
-        functions_objs = [Function(**msg) for msg in functions]
-        with Session(self.engine) as session:
-            session.bulk_save_objects(functions_objs, return_defaults=True)
-            session.commit()
-        return functions_objs
+            return
+        with self.engine.begin() as conn:
+            for i in range(0, len(functions), BULK_CHUNK_SIZE):
+                conn.execute(insert(Function), functions[i:i + BULK_CHUNK_SIZE])
 
     def bulk_add_pdbs(self, pdbs):
         """ used to import lot of repos at a time """
         if not pdbs:
-            return []
-        pdb_dbobjs = [PDB(**msg) for msg in pdbs]
-        with Session(self.engine) as session:
-            session.bulk_save_objects(pdb_dbobjs, return_defaults=True)
-            session.commit()
-        return pdb_dbobjs
+            return
+        with self.engine.begin() as conn:
+            for i in range(0, len(pdbs), BULK_CHUNK_SIZE):
+                conn.execute(insert(PDB), pdbs[i:i + BULK_CHUNK_SIZE])
 
     def bulk_add_rvas(self, rvas):
         """ used to import lot of repos at a time """
         if not rvas:
-            return []
-        rva_db_objs = [RVA(**msg) for msg in rvas]
-        with Session(self.engine) as session:
-            session.bulk_save_objects(rva_db_objs, return_defaults=True)
-            session.commit()
-        return rva_db_objs
+            return
+        with self.engine.begin() as conn:
+            for i in range(0, len(rvas), BULK_CHUNK_SIZE):
+                conn.execute(insert(RVA), rvas[i:i + BULK_CHUNK_SIZE])
 
     def add_line(self, line_number, rva, length, source_code, function_id):
         with Session(self.engine) as session:
@@ -117,12 +112,53 @@ class Dataset_DB:
     def bulk_add_lines(self, lines):
         """ used to import lot of repos at a time """
         if not lines:
-            return []
-        objs = [Line(**msg) for msg in lines]
-        with Session(self.engine) as session:
-            session.bulk_save_objects(objs, return_defaults=True)
-            session.commit()
-        return objs
+            return
+        with self.engine.begin() as conn:
+            for i in range(0, len(lines), BULK_CHUNK_SIZE):
+                conn.execute(insert(Line), lines[i:i + BULK_CHUNK_SIZE])
+
+    def bulk_flush(self, binaries, functions, lines, rvas, pdbs,
+                   include_functions=True, include_lines=True,
+                   include_rvas=True, include_pdbs=True):
+        """Insert all tables, one per-table transaction so a failure in one
+        table doesn't roll back successfully-prepared rows in another. Each
+        chunk is its own transaction; on chunk failure we log loudly and
+        continue with the next chunk rather than losing the whole batch.
+        """
+        bin_rows = list(binaries)
+
+        def _insert_chunked(table, rows, label):
+            for i in range(0, len(rows), BULK_CHUNK_SIZE):
+                chunk = rows[i:i + BULK_CHUNK_SIZE]
+                try:
+                    with self.engine.begin() as conn:
+                        conn.execute(insert(table), chunk)
+                except sqlalchemy.exc.SQLAlchemyError as e:
+                    logging.error(
+                        "bulk_flush: %s chunk %d-%d (size %d) failed: %s",
+                        label, i, i + len(chunk), len(chunk), e,
+                    )
+                    # Best-effort row-by-row recovery so a single bad row
+                    # does not lose the whole chunk.
+                    for row in chunk:
+                        try:
+                            with self.engine.begin() as conn:
+                                conn.execute(insert(table), [row])
+                        except sqlalchemy.exc.SQLAlchemyError as e2:
+                            logging.error(
+                                "bulk_flush: %s row dropped: %s (row=%r)",
+                                label, e2, row,
+                            )
+
+        _insert_chunked(Binary, bin_rows, "binaries")
+        if include_functions and functions:
+            _insert_chunked(Function, functions, "functions")
+        if include_lines and lines:
+            _insert_chunked(Line, lines, "lines")
+        if include_rvas and rvas:
+            _insert_chunked(RVA, rvas, "rvas")
+        if include_pdbs and pdbs:
+            _insert_chunked(PDB, pdbs, "pdbs")
 
     def delete_binary(self, binary_id, filepath=None):
         with Session(self.engine) as session:
@@ -141,7 +177,7 @@ class Dataset_DB:
 
     def update_version(self, url, version):
         with Session(self.engine) as session:
-            q = update(Binary).where(Binary.github_url == url).values(repo_commit_hash=version)
+            q = update(Binary).where(Binary.github_url == url).values(repo_commit=version)
             session.execute(q)
             session.commit()
 
