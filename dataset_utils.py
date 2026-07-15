@@ -282,12 +282,18 @@ def db_construct(dbfile, target_dir, include_lines, include_functions, include_r
                     if binary_file["file"] != filename:
                         continue
                     bin_id = binary_rela[filename]
+                    # Recognized non-function ELF section names that the legacy
+                    # extractor inadvertently picked up. We DON'T filter every
+                    # `.` -prefixed name because legit OpenMP/IPA helpers like
+                    # `.omp_outlined.` and `.constprop.` are real functions.
+                    SECTION_PSEUDO = {
+                        ".text", ".bss", ".data", ".rodata", ".plt",
+                        ".init", ".fini", ".init_array", ".fini_array",
+                        ".dynsym", ".dynstr", ".symtab", ".strtab",
+                    }
                     for function_info in binary_file["functions"]:
                         function_name = function_info["function_name"]
-                        # Skip section pseudo-symbols (e.g. ".text") and
-                        # empty names. These are ELF sections that the
-                        # legacy extractor inadvertently picked up.
-                        if not function_name or function_name.startswith("."):
+                        if not function_name or function_name in SECTION_PSEUDO:
                             continue
                         rvablocks = [{
                                         "start": int(x['rva_start'], 16),
